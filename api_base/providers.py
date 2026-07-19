@@ -12,6 +12,7 @@ class ProviderResult:
     status_code: int | None
     models: list[str]
     error: str | None = None
+    comment: str | None = None
 
 
 class QuotaExceededError(Exception):
@@ -84,29 +85,11 @@ def _minimal_chat_payload(provider: str, model: str | None = None) -> tuple[str,
                 "max_tokens": 1,
             },
         )
-    if provider == "deepseek":
-        return (
-            "https://api.deepseek.com/chat/completions",
-            {
-                "model": model or "deepseek-v4-flash",
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 1,
-            },
-        )
     if provider == "groq":
         return (
             "https://api.groq.com/openai/v1/chat/completions",
             {
                 "model": model or "openai/gpt-oss-120b",
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 1,
-            },
-        )
-    if provider == "openrouter":
-        return (
-            "https://openrouter.ai/api/v1/chat/completions",
-            {
-                "model": model or "deepseek/deepseek-r1-0528",
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1,
             },
@@ -185,6 +168,100 @@ def _classify_error(provider: str, response: httpx.Response) -> str:
     return "unknown"
 
 
+def _failure_result(provider: str, response: httpx.Response) -> ProviderResult:
+    category = _classify_error(provider, response)
+    messages = {
+        "rate_limited": "Rate limited. Slow down and retry later.",
+        "invalid_key": "Invalid or revoked API key.",
+        "quota_exhausted": "Quota exhausted. Add credits or switch key.",
+        "server_error": "Provider server error.",
+        "client_error": f"Provider returned HTTP {response.status_code}.",
+        "unknown": f"Provider returned HTTP {response.status_code}.",
+    }
+    return ProviderResult(response.status_code, [], messages.get(category, messages["unknown"]))
+
+
+def _check_deepseek_balance(
+    api_key: str,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ProviderResult:
+    headers = _auth_headers("deepseek", api_key)
+    try:
+        with httpx.Client(
+            transport=transport,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = client.get("https://api.deepseek.com/user/balance", headers=headers)
+    except httpx.HTTPError:
+        return ProviderResult(None, [], "Could not reach the provider endpoint.")
+
+    if response.status_code != 200:
+        return _failure_result("deepseek", response)
+
+    try:
+        data = response.json()
+    except ValueError:
+        return ProviderResult(200, [], "Provider returned an unreadable balance response.")
+
+    parts = [
+        f"{balance.get('total_balance', 'N/A')} {balance.get('currency', '')}".strip()
+        for balance in data.get("balance_infos", [])
+        if isinstance(balance, dict)
+    ]
+    comment = ", ".join(parts) if parts else "no balance info"
+    return ProviderResult(200, [], None, comment)
+
+
+_OPENROUTER_RESET_PERIODS = {"daily": "day", "weekly": "week", "monthly": "month"}
+
+
+def _check_openrouter_key(
+    api_key: str,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ProviderResult:
+    headers = _auth_headers("openrouter", api_key)
+    try:
+        with httpx.Client(
+            transport=transport,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = client.get("https://openrouter.ai/api/v1/key", headers=headers)
+    except httpx.HTTPError:
+        return ProviderResult(None, [], "Could not reach the provider endpoint.")
+
+    if response.status_code != 200:
+        return _failure_result("openrouter", response)
+
+    try:
+        data = response.json().get("data", {})
+    except ValueError:
+        return ProviderResult(200, [], "Provider returned an unreadable key response.")
+    if not isinstance(data, dict):
+        data = {}
+
+    tier = "free" if data.get("is_free_tier") else "paid"
+
+    limit = data.get("limit")
+    if limit is None:
+        limit_part = "unlimited"
+    else:
+        limit_part = f"{limit}$"
+        reset = data.get("limit_reset")
+        if reset:
+            period = _OPENROUTER_RESET_PERIODS.get(str(reset).lower(), str(reset))
+            limit_part += f"/{period}"
+
+    usage = data.get("usage")
+    total_spent = usage if usage is not None else "N/A"
+
+    comment = f"{tier} tier - {limit_part} - {total_spent}$"
+    return ProviderResult(200, [], None, comment)
+
+
 def check_key_health(
     provider: str,
     api_key: str,
@@ -192,6 +269,13 @@ def check_key_health(
     model: str | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> ProviderResult:
+    # DeepSeek and OpenRouter expose account endpoints, so their health check
+    # is a cheap GET that also yields balance/limit info for the key comment.
+    if provider == "deepseek":
+        return _check_deepseek_balance(api_key, transport=transport)
+    if provider == "openrouter":
+        return _check_openrouter_key(api_key, transport=transport)
+
     try:
         url, payload = _minimal_chat_payload(provider, model)
     except ValueError as error:
@@ -215,16 +299,7 @@ def check_key_health(
     if response.status_code == 200:
         return ProviderResult(200, [], None)
 
-    category = _classify_error(provider, response)
-    messages = {
-        "rate_limited": "Rate limited. Slow down and retry later.",
-        "invalid_key": "Invalid or revoked API key.",
-        "quota_exhausted": "Quota exhausted. Add credits or switch key.",
-        "server_error": "Provider server error.",
-        "client_error": f"Provider returned HTTP {response.status_code}.",
-        "unknown": f"Provider returned HTTP {response.status_code}.",
-    }
-    return ProviderResult(response.status_code, [], messages.get(category, messages["unknown"]))
+    return _failure_result(provider, response)
 
 
 def fetch_models(

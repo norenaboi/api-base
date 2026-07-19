@@ -388,19 +388,32 @@ class Vault:
                 raise KeyNotFoundError(f"API-key record {record_id} was not found.")
 
     def update_check_result(
-        self, record_id: int, status_code: int | None, models: list[str], error_message: str | None = None
+        self,
+        record_id: int,
+        status_code: int | None,
+        models: list[str],
+        error_message: str | None = None,
+        user_comment: str | None = None,  # None means "leave the existing comment"
     ) -> None:
+        assignments = [
+            "status_code = ?",
+            "models_json = ?",
+            "error_message = ?",
+            "last_checked_at = CURRENT_TIMESTAMP",
+            "updated_at = CURRENT_TIMESTAMP",
+        ]
+        parameters: list[object] = [
+            status_code,
+            json.dumps(models, separators=(",", ":")),
+            error_message,
+        ]
+        if user_comment is not None:
+            assignments.insert(3, "user_comment = ?")
+            parameters.append(user_comment)
+        parameters.append(record_id)
+        query = f"UPDATE api_keys SET {', '.join(assignments)} WHERE id = ?"  # noqa: S608
         with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE api_keys
-                SET status_code = ?, models_json = ?, error_message = ?,
-                    last_checked_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (status_code, json.dumps(models, separators=(",", ":")), error_message, record_id),
-            )
+            cursor = connection.execute(query, parameters)
             if cursor.rowcount == 0:
                 raise KeyNotFoundError(f"API-key record {record_id} was not found.")
 

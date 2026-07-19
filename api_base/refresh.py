@@ -28,18 +28,21 @@ def refresh_key(
     model_result = fetch_models(provider, api_key, transport=transport)
     models = model_result.models if model_result.status_code == 200 else []
 
-    # 2. Chat-completion health check — the status code displayed comes from this.
+    # 2. Health check — the status code displayed comes from this. For DeepSeek
+    #    and OpenRouter this is an account-info GET that also returns a comment
+    #    (balance / tier+limit+spend); other providers use a chat completion.
     health = check_key_health(provider, api_key, model=check_model, transport=transport)
 
-    # 3. Persist: models from the fetch, status+error from the health check.
+    # 3. Persist: models from the fetch, status+error+comment from the health check.
     combined_error = health.error or model_result.error
     vault.update_check_result(
         record_id,
         health.status_code,
         models,
         error_message=combined_error,
+        user_comment=health.comment,
     )
-    return ProviderResult(health.status_code, models, combined_error)
+    return ProviderResult(health.status_code, models, combined_error, health.comment)
 
 
 def refresh_all(
