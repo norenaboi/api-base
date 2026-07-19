@@ -98,6 +98,25 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
         return wrapped
 
+    def wants_json() -> bool:
+        return request.accept_mimetypes.best == "application/json"
+
+    def row_data(record_id: int) -> dict[str, Any]:
+        record = vault().get_key(record_id)
+        return {
+            "record_id": record_id,
+            "html": render_template("_key_rows.html", record=record),
+        }
+
+    def row_payload(record_id: int, *, message: str = "") -> Any:
+        return jsonify({**row_data(record_id), "message": message})
+
+    def mutation_error(error: Exception, status: int = 400) -> Any:
+        if wants_json():
+            return jsonify({"error": str(error)}), status
+        flash(str(error), "error")
+        return redirect(url_for("index"))
+
     @app.get("/")
     def index() -> str:
         if not vault().is_initialized():
@@ -118,9 +137,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             records = vault().list_keys(include_trashed=include_trashed)
             sort_by = "id"
             direction = "asc"
-        all_models = sorted(
-            {str(item) for record in vault().list_keys() for item in record["models"]}
-        )
+        all_models = vault().list_models()
         return render_template(
             "index.html",
             state="unlocked",
@@ -185,11 +202,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 "check_model": request.form.get("check_model", "") or None,
             }
             record = normalize_record(raw_record)
-            vault().create_key(unlocked_keys(), **record)  # type: ignore[arg-type]
+            record_id = vault().create_key(unlocked_keys(), **record)  # type: ignore[arg-type]
         except (DuplicateKeyError, TypeError, ValueError) as error:
-            flash(str(error), "error")
-        else:
-            flash("API key added.", "success")
+            return mutation_error(error)
+        if wants_json():
+            return row_payload(record_id, message="API key added.")
+        flash("API key added.", "success")
         return redirect(url_for("index"))
 
     @app.post("/keys/<int:record_id>/edit")
@@ -219,9 +237,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 check_model=record["check_model"],
             )
         except (VaultError, TypeError, ValueError) as error:
-            flash(str(error), "error")
-        else:
-            flash("API key updated.", "success")
+            return mutation_error(error)
+        if wants_json():
+            return row_payload(record_id, message="API key updated.")
+        flash("API key updated.", "success")
         return redirect(url_for("index"))
 
     @app.post("/keys/<int:record_id>/reveal")
@@ -239,9 +258,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         try:
             vault().delete_key(record_id)
         except VaultError as error:
-            flash(str(error), "error")
-        else:
-            flash("API key deleted.", "success")
+            return mutation_error(error, 404)
+        if wants_json():
+            return jsonify(
+                {"record_id": record_id, "removed": True, "message": "API key deleted."}
+            )
+        flash("API key deleted.", "success")
         return redirect(url_for("index"))
 
     @app.post("/keys/<int:record_id>/trash")
@@ -251,9 +273,13 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         try:
             vault().set_trashed(record_id, trashed)
         except VaultError as error:
-            flash(str(error), "error")
-        else:
-            flash("API key moved to trash." if trashed else "API key restored.", "success")
+            return mutation_error(error, 404)
+        message = "API key moved to trash." if trashed else "API key restored."
+        if wants_json():
+            if trashed and request.form.get("include_trashed", "0") != "1":
+                return jsonify({"record_id": record_id, "removed": True, "message": message})
+            return row_payload(record_id, message=message)
+        flash(message, "success")
         return redirect(url_for("index"))
 
     @app.post("/keys/<int:record_id>/refresh")
@@ -267,12 +293,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 transport=app.config.get("HTTP_TRANSPORT"),
             )
         except VaultError as error:
-            flash(str(error), "error")
-        else:
-            if result.error:
-                flash(result.error, "warning")
-            else:
-                flash(f"Refreshed key; found {len(result.models)} models.", "success")
+            return mutation_error(error, 404)
+        message = result.error or f"Refreshed key; found {len(result.models)} models."
+        if wants_json():
+            return row_payload(record_id, message=message)
+        flash(message, "warning" if result.error else "success")
         return redirect(url_for("index"))
 
     @app.post("/refresh-all")
@@ -284,8 +309,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             try:
                 record_ids = [int(part) for part in raw_ids.split(",") if part.strip()]
             except ValueError:
-                flash("Invalid record ids for refresh.", "error")
-                return redirect(url_for("index"))
+                return mutation_error(ValueError("Invalid record ids for refresh."))
         try:
             results = refresh_all(
                 vault(),
@@ -297,8 +321,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             flash(str(error), "error")
             return redirect(url_for("index"))
         failures = sum(result.error is not None for result in results.values())
+        message = f"Refreshed {len(results)} keys; {failures} returned errors."
+        if wants_json():
+            return jsonify(
+                {
+                    "rows": [row_data(record_id) for record_id in results],
+                    "message": message,
+                    "failures": failures,
+                }
+            )
         category = "warning" if failures else "success"
-        flash(f"Refreshed {len(results)} keys; {failures} returned errors.", category)
+        flash(message, category)
         return redirect(url_for("index"))
 
     @app.post("/import")

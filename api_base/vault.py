@@ -426,6 +426,51 @@ class Vault:
             if cursor.rowcount == 0:
                 raise KeyNotFoundError(f"API-key record {record_id} was not found.")
 
+    @staticmethod
+    def _record_from_row(row: sqlite3.Row) -> dict[str, object]:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "typeofkey": row["key_type"],
+            "masked_key": (
+                f"{row['key_first_four']}...{row['key_last_four']}"
+                if row["key_first_four"]
+                else f"••••{row['key_last_four']}"
+            ),
+            "status_code": row["status_code"],
+            "error_message": row["error_message"],
+            "check_model": row["check_model"],
+            "models": json.loads(row["models_json"]),
+            "user_comment": row["user_comment"],
+            "last_checked_at": row["last_checked_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "trashed": bool(row["trashed"]),
+        }
+
+    def get_key(self, record_id: int) -> dict[str, object]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, name, key_type, key_first_four, key_last_four, status_code,
+                       models_json, user_comment, error_message, check_model, last_checked_at,
+                       created_at, updated_at, trashed
+                FROM api_keys
+                WHERE id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyNotFoundError(f"API-key record {record_id} was not found.")
+        return self._record_from_row(row)
+
+    def list_models(self) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT models_json FROM api_keys WHERE trashed = 0"
+            ).fetchall()
+        return sorted({str(model) for row in rows for model in json.loads(row["models_json"])})
+
     def list_keys(
         self,
         *,
@@ -470,40 +515,21 @@ class Vault:
         nulls_last = (
             "(api_keys.status_code IS NULL) ASC, " if sort_by == "status_code" else ""
         )
-        query = f"""
+        query = (
+            f"""
             SELECT id, name, key_type, key_first_four, key_last_four, status_code, models_json,
                    user_comment, error_message, check_model, last_checked_at, created_at,
                    updated_at, trashed
             FROM api_keys
             {where_clause}
             ORDER BY {nulls_last}{sort_column} {normalized_direction.upper()}, api_keys.id ASC
-        """
+            """  # noqa: S608
+        )
 
         with self._connect() as connection:
             rows = connection.execute(query, parameters).fetchall()
 
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "typeofkey": row["key_type"],
-                "masked_key": (
-                    f"{row['key_first_four']}...{row['key_last_four']}"
-                    if row["key_first_four"]
-                    else f"••••{row['key_last_four']}"
-                ),
-                "status_code": row["status_code"],
-                "error_message": row["error_message"],
-                "check_model": row["check_model"],
-                "models": json.loads(row["models_json"]),
-                "user_comment": row["user_comment"],
-                "last_checked_at": row["last_checked_at"],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-                "trashed": bool(row["trashed"]),
-            }
-            for row in rows
-        ]
+        return [self._record_from_row(row) for row in rows]
 
     def reveal_key(self, keys: VaultKeyMaterial, record_id: int) -> str:
         with self._connect() as connection:

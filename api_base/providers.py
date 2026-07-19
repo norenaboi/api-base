@@ -206,7 +206,7 @@ def _check_deepseek_balance(
         return ProviderResult(200, [], "Provider returned an unreadable balance response.")
 
     parts = [
-        f"{balance.get('total_balance', 'N/A')} {balance.get('currency', '')}".strip()
+        f"{balance.get('total_balance', 'N/A')} {balance.get('currency', '').toFixed(2)}".strip()
         for balance in data.get("balance_infos", [])
         if isinstance(balance, dict)
     ]

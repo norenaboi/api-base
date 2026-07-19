@@ -3,6 +3,17 @@
 
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const toast = document.querySelector(".toast");
+  const keyTableBody = document.querySelector("[data-key-table-body]");
+  const modelSearch = document.getElementById("model-search");
+  const clearModelButton = document.querySelector("[data-clear-model]");
+  const headerFilters = document.querySelectorAll("[data-filter-key]");
+  const recordCount = document.querySelector(".record-count strong");
+  const trashToggle = document.querySelector("[data-trash-toggle]");
+  const url = new URL(window.location.href);
+  const rowPairs = new Map();
+  const textSorter = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  let activeSort = { key: "", direction: "asc" };
+  let filterTimeoutId;
 
   function showToast(message) {
     if (!toast) return;
@@ -22,30 +33,49 @@
   document.querySelectorAll("[data-open-dialog]").forEach((button) => {
     button.addEventListener("click", () => openDialog(document.getElementById(button.dataset.openDialog)));
   });
-
   document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     button.addEventListener("click", () => button.closest("dialog")?.close());
   });
-
   document.querySelectorAll("dialog").forEach((dialog) => {
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog) dialog.close();
     });
   });
 
-  const modelFilter = document.querySelector("[data-model-filter]");
-  const modelSearch = document.getElementById("model-search");
-  const clearModelButton = document.querySelector("[data-clear-model]");
-  const headerFilters = document.querySelectorAll("[data-filter-key]");
-  const keyTableBody = document.querySelector("[data-key-table-body]");
-  const url = new URL(window.location.href);
+  function rebuildRowIndex() {
+    rowPairs.clear();
+    if (!keyTableBody) return;
+    const expansionRows = new Map(
+      Array.from(keyTableBody.querySelectorAll("tr[data-expansion-for]"), (row) => [
+        row.dataset.expansionFor,
+        row,
+      ])
+    );
+    keyTableBody.querySelectorAll("tr[data-record-id]").forEach((row) => {
+      rowPairs.set(row.dataset.recordId, {
+        row,
+        expansionRow: expansionRows.get(row.dataset.recordId) || null,
+      });
+    });
+    updateRecordCount();
+  }
+
+  function updateRecordCount() {
+    if (recordCount) recordCount.textContent = String(rowPairs.size);
+    if (!keyTableBody) return;
+    const emptyRow = keyTableBody.querySelector("[data-empty-row]");
+    if (rowPairs.size && emptyRow) emptyRow.remove();
+    if (!rowPairs.size && !emptyRow) {
+      keyTableBody.insertAdjacentHTML(
+        "beforeend",
+        '<tr data-empty-row><td colspan="7"><div class="empty-state"><span class="empty-icon" aria-hidden="true">◇</span><h3>No keys in this view</h3><p>Add a key or adjust the current filters.</p></div></td></tr>'
+      );
+    }
+  }
 
   function updateUrlParam(key, value) {
-    if (value) {
-      url.searchParams.set(key, value);
-    } else {
-      url.searchParams.delete(key);
-    }
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
     window.history.replaceState({}, "", url);
   }
 
@@ -61,32 +91,22 @@
   }
 
   function applyFilters() {
-    if (!keyTableBody) return;
     const modelTerm = modelSearch ? modelSearch.value.trim().toLowerCase() : "";
     const providerFilter = document.querySelector('[data-filter-key="provider"]')?.value || "";
     const statusFilter = document.querySelector('[data-filter-key="status"]')?.value || "";
     if (clearModelButton) clearModelButton.hidden = modelTerm === "";
 
-    keyTableBody.querySelectorAll("tr[data-record-id]").forEach((row) => {
-      const models = (row.dataset.models || "").toLowerCase();
-      const provider = (row.dataset.sortProvider || "").toLowerCase();
-      const status = row.dataset.sortStatus || "";
-      const matchesModel = modelTerm === "" || models.includes(modelTerm);
-      const matchesProvider = providerFilter === "" || provider === providerFilter;
-      const matchesStatus = matchesStatusFilter(status, statusFilter);
-      const visible = matchesModel && matchesProvider && matchesStatus;
+    rowPairs.forEach(({ row, expansionRow }) => {
+      const matchesModel = modelTerm === "" || (row.dataset.models || "").toLowerCase().includes(modelTerm);
+      const matchesProvider = providerFilter === "" || (row.dataset.sortProvider || "").toLowerCase() === providerFilter;
+      const visible = matchesModel && matchesProvider && matchesStatusFilter(row.dataset.sortStatus || "", statusFilter);
       row.hidden = !visible;
-      const expansionRow = keyTableBody.querySelector(
-        `[data-expansion-for="${row.dataset.recordId}"]`
-      );
       if (expansionRow && !visible) expansionRow.hidden = true;
     });
   }
 
   function initFiltersFromUrl() {
-    if (modelSearch) {
-      modelSearch.value = url.searchParams.get("model") || "";
-    }
+    if (modelSearch) modelSearch.value = url.searchParams.get("model") || "";
     headerFilters.forEach((select) => {
       select.value = url.searchParams.get(select.dataset.filterKey) || "";
     });
@@ -95,20 +115,19 @@
 
   if (modelSearch) {
     modelSearch.addEventListener("input", () => {
-      updateUrlParam("model", modelSearch.value.trim());
-      applyFilters();
+      window.clearTimeout(filterTimeoutId);
+      filterTimeoutId = window.setTimeout(() => {
+        updateUrlParam("model", modelSearch.value.trim());
+        applyFilters();
+      }, 150);
     });
   }
-
-  if (clearModelButton) {
-    clearModelButton.addEventListener("click", () => {
-      if (modelSearch) modelSearch.value = "";
-      updateUrlParam("model", "");
-      applyFilters();
-      if (modelSearch) modelSearch.focus();
-    });
-  }
-
+  clearModelButton?.addEventListener("click", () => {
+    if (modelSearch) modelSearch.value = "";
+    updateUrlParam("model", "");
+    applyFilters();
+    modelSearch?.focus();
+  });
   headerFilters.forEach((select) => {
     select.addEventListener("change", () => {
       updateUrlParam(select.dataset.filterKey, select.value);
@@ -116,62 +135,43 @@
     });
   });
 
-  initFiltersFromUrl();
-
-  document.querySelectorAll("[data-auto-submit]").forEach((control) => {
-    control.addEventListener("change", () => control.form?.requestSubmit());
-  });
-
-  const sortButtons = document.querySelectorAll("[data-sort-key]");
-  const textSorter = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-  let activeSort = { key: "", direction: "asc" };
-
   function sortValue(row, key) {
     return row.dataset[`sort${key.charAt(0).toUpperCase()}${key.slice(1)}`] ?? "";
   }
 
-  sortButtons.forEach((button) => {
+  function sortCurrentRows() {
+    if (!keyTableBody || !activeSort.key) return;
+    const multiplier = activeSort.direction === "asc" ? 1 : -1;
+    const pairs = Array.from(rowPairs.values());
+    pairs.sort(({ row: rowA }, { row: rowB }) => {
+      const valueA = sortValue(rowA, activeSort.key);
+      const valueB = sortValue(rowB, activeSort.key);
+      if (activeSort.key === "status") {
+        if (valueA === "" && valueB === "") return 0;
+        if (valueA === "") return 1;
+        if (valueB === "") return -1;
+        return (Number(valueA) - Number(valueB)) * multiplier;
+      }
+      return textSorter.compare(valueA, valueB) * multiplier;
+    });
+    for (const { row, expansionRow } of pairs) {
+      keyTableBody.append(row);
+      if (expansionRow) keyTableBody.append(expansionRow);
+    }
+  }
+
+  document.querySelectorAll("[data-sort-key]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (!keyTableBody) return;
       const key = button.dataset.sortKey;
       const direction = activeSort.key === key && activeSort.direction === "asc" ? "desc" : "asc";
       activeSort = { key, direction };
-      const multiplier = direction === "asc" ? 1 : -1;
-      const rows = Array.from(keyTableBody.querySelectorAll("tr[data-record-id]"));
-
-      rows.sort((rowA, rowB) => {
-        const valueA = sortValue(rowA, key);
-        const valueB = sortValue(rowB, key);
-        if (key === "status") {
-          if (valueA === "" && valueB === "") return 0;
-          if (valueA === "") return 1;
-          if (valueB === "") return -1;
-          return (Number(valueA) - Number(valueB)) * multiplier;
-        }
-        return textSorter.compare(valueA, valueB) * multiplier;
-      });
-
-      // Re-append each data row followed by its expansion row (if any) to keep them paired.
-      for (const row of rows) {
-        const expansionRow = keyTableBody.querySelector(
-          `[data-expansion-for="${row.dataset.recordId}"]`
-        );
-        keyTableBody.append(row);
-        if (expansionRow) keyTableBody.append(expansionRow);
-      }
-
+      sortCurrentRows();
       document.querySelectorAll("[data-sort-header]").forEach((header) => {
         const isActive = header.dataset.sortHeader === key;
         header.setAttribute("aria-sort", isActive ? (direction === "asc" ? "ascending" : "descending") : "none");
         const indicator = header.querySelector("[data-sort-indicator]");
         if (indicator) indicator.textContent = isActive ? (direction === "asc" ? "↑" : "↓") : "↕";
       });
-    });
-  });
-
-  document.querySelectorAll("form[data-confirm]").forEach((form) => {
-    form.addEventListener("submit", (event) => {
-      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
     });
   });
 
@@ -186,308 +186,251 @@
     return payload.key;
   }
 
+  async function submitFormAjax(formOrAction, suppliedFormData = null) {
+    const action = typeof formOrAction === "string" ? formOrAction : formOrAction.action;
+    const formData = suppliedFormData || new FormData(formOrAction);
+    if (!formData.get("csrf_token")) formData.append("csrf_token", csrfToken);
+    const response = await fetch(action, {
+      method: "POST",
+      headers: { "Accept": "application/json" },
+      body: formData,
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Request failed.");
+    return payload;
+  }
+
+  function parseRowFragment(html) {
+    const table = document.createElement("table");
+    const body = document.createElement("tbody");
+    table.append(body);
+    body.innerHTML = html;
+    const row = body.querySelector("tr[data-record-id]");
+    if (!row) throw new Error("The server returned an invalid row.");
+    return { row, expansionRow: body.querySelector(`[data-expansion-for="${row.dataset.recordId}"]`) };
+  }
+
+  function removeRow(recordId) {
+    const pair = rowPairs.get(String(recordId));
+    if (!pair) return;
+    pair.row.remove();
+    pair.expansionRow?.remove();
+    rowPairs.delete(String(recordId));
+  }
+
+  function applyRowPayload(payload) {
+    if (payload.removed) {
+      removeRow(payload.record_id);
+      return;
+    }
+    if (!payload.html) return;
+    const pair = parseRowFragment(payload.html);
+    const recordId = String(pair.row.dataset.recordId);
+    const oldPair = rowPairs.get(recordId);
+    if (oldPair) {
+      oldPair.expansionRow?.remove();
+      oldPair.row.replaceWith(pair.row);
+      if (pair.expansionRow) pair.row.after(pair.expansionRow);
+    } else {
+      keyTableBody?.append(pair.row);
+      if (pair.expansionRow) keyTableBody?.append(pair.expansionRow);
+    }
+    rowPairs.set(recordId, pair);
+  }
+
+  function reconcileRows(payloads) {
+    payloads.forEach(applyRowPayload);
+    updateRecordCount();
+    applyFilters();
+    sortCurrentRows();
+  }
+
   const editDialog = document.getElementById("edit-key-dialog");
   const editForm = document.getElementById("edit-key-form");
 
-  async function refreshTableBody(fetchUrl) {
-    if (!keyTableBody) return;
-    const response = await fetch(fetchUrl || window.location.href, {
-      method: "GET",
-      headers: { "Accept": "text/html" },
-      credentials: "same-origin",
-    });
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-    const newBody = doc.querySelector("[data-key-table-body]");
-    if (newBody) {
-      keyTableBody.innerHTML = newBody.innerHTML;
-      attachRowActionListeners();
-      initFiltersFromUrl();
+  function populateEditDialog(button) {
+    if (!editDialog || !editForm) return;
+    editForm.action = `/keys/${button.dataset.editId}/edit`;
+    editForm.querySelector('[data-edit-field="name"]').value = button.dataset.editName || "";
+    editForm.querySelector('[data-edit-field="provider"]').value = button.dataset.editProvider || "";
+    editForm.querySelector('[data-edit-field="status"]').value = button.dataset.editStatus || "";
+    editForm.querySelector('[data-edit-field="models"]').value = button.dataset.editModels || "";
+    editForm.querySelector('input[name="key"]').value = "";
+    const checkModelSelect = editForm.querySelector('[data-edit-field="check_model"]');
+    if (checkModelSelect) {
+      const current = button.dataset.editCheckModel || "";
+      const models = (button.dataset.editModels || "").split(",").map((model) => model.trim()).filter(Boolean);
+      checkModelSelect.replaceChildren(new Option("Provider default", ""));
+      models.forEach((model) => checkModelSelect.add(new Option(model, model, false, model === current)));
+      if (current && !models.includes(current)) checkModelSelect.add(new Option(`${current} (not in models)`, current, true, true));
+      if (!current) checkModelSelect.value = "";
     }
+    editForm.querySelector('[data-edit-field="comment"]').value = button.dataset.editComment || "";
+    openDialog(editDialog);
   }
 
-  function attachRowActionListeners() {
-    document.querySelectorAll("[data-copy-id]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          const secret = await getSecret(button.dataset.copyId);
-          await navigator.clipboard.writeText(secret);
-          showToast("API key copied to clipboard.");
-        } catch (error) {
-          showToast(error.message || "Copy failed.");
-        } finally {
-          button.disabled = false;
-        }
-      });
-    });
-
-    document.querySelectorAll("[data-reveal-id]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const row = button.closest("tr");
-        const display = row?.querySelector("[data-secret-display]");
+  keyTableBody?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button");
+    if (!button || !keyTableBody.contains(button)) return;
+    if (button.dataset.editId) return populateEditDialog(button);
+    if (button.dataset.toggleModels) {
+      const expansionRow = rowPairs.get(button.dataset.toggleModels)?.expansionRow;
+      if (!expansionRow) return;
+      const isOpen = !expansionRow.hidden;
+      expansionRow.hidden = isOpen;
+      button.setAttribute("aria-expanded", String(!isOpen));
+      return;
+    }
+    if (!button.dataset.copyId && !button.dataset.revealId) return;
+    button.disabled = true;
+    try {
+      if (button.dataset.copyId) {
+        await navigator.clipboard.writeText(await getSecret(button.dataset.copyId));
+        showToast("API key copied to clipboard.");
+      } else {
+        const display = button.closest("tr")?.querySelector("[data-secret-display]");
         if (!display) return;
         if (button.dataset.visible === "true") {
           display.textContent = button.dataset.maskedKey;
           button.dataset.visible = "false";
           button.textContent = "Reveal";
-          return;
-        }
-        button.disabled = true;
-        try {
+        } else {
           display.textContent = await getSecret(button.dataset.revealId);
           button.dataset.visible = "true";
           button.textContent = "Hide";
-        } catch (error) {
-          showToast(error.message || "Reveal failed.");
-        } finally {
-          button.disabled = false;
         }
-      });
-    });
-
-    document.querySelectorAll("[data-toggle-models]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const recordId = button.dataset.toggleModels;
-        const expansionRow = keyTableBody?.querySelector(
-          `[data-expansion-for="${recordId}"]`
-        );
-        if (!expansionRow) return;
-        const isOpen = !expansionRow.hidden;
-        expansionRow.hidden = isOpen;
-        button.setAttribute("aria-expanded", String(!isOpen));
-      });
-    });
-
-    document.querySelectorAll("[data-edit-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (!editDialog || !editForm) return;
-        editForm.action = `/keys/${button.dataset.editId}/edit`;
-        editForm.querySelector('[data-edit-field="name"]').value = button.dataset.editName || "";
-        editForm.querySelector('[data-edit-field="provider"]').value = button.dataset.editProvider || "";
-        editForm.querySelector('[data-edit-field="status"]').value = button.dataset.editStatus || "";
-        editForm.querySelector('[data-edit-field="models"]').value = button.dataset.editModels || "";
-        editForm.querySelector('input[name="key"]').value = "";
-
-        // Populate check-model dropdown from the key's stored models
-        const checkModelSelect = editForm.querySelector('[data-edit-field="check_model"]');
-        if (checkModelSelect) {
-          const currentCheckModel = button.dataset.editCheckModel || "";
-          const models = (button.dataset.editModels || "").split(",").map(m => m.trim()).filter(Boolean);
-          checkModelSelect.innerHTML = '<option value="">Provider default</option>';
-          for (const model of models) {
-            const option = document.createElement("option");
-            option.value = model;
-            option.textContent = model;
-            if (model === currentCheckModel) option.selected = true;
-            checkModelSelect.appendChild(option);
-          }
-          if (![...checkModelSelect.options].some(o => o.value === currentCheckModel) && currentCheckModel) {
-            const customOption = document.createElement("option");
-            customOption.value = currentCheckModel;
-            customOption.textContent = currentCheckModel + " (not in models)";
-            customOption.selected = true;
-            checkModelSelect.appendChild(customOption);
-          }
-          if (!currentCheckModel) checkModelSelect.value = "";
-        }
-
-        editForm.querySelector('[data-edit-field="comment"]').value = button.dataset.editComment || "";
-        openDialog(editDialog);
-      });
-    });
-
-    document.querySelectorAll("form[data-confirm]:not([data-async-skip])").forEach((form) => {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!window.confirm(form.dataset.confirm)) return;
-        const formData = new FormData(form);
-        formData.append("csrf_token", csrfToken);
-        try {
-          const response = await fetch(form.action, {
-            method: "POST",
-            body: formData,
-            credentials: "same-origin",
-          });
-          if (!response.ok) throw new Error("Delete failed.");
-          showToast("API key deleted.");
-          await refreshTableBody();
-        } catch (error) {
-          showToast(error.message || "Delete failed.");
-        }
-      });
-    });
-
-    document.querySelectorAll('form[action$="/refresh"]').forEach((form) => {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const formData = new FormData(form);
-        formData.append("csrf_token", csrfToken);
-        try {
-          const response = await fetch(form.action, {
-            method: "POST",
-            body: formData,
-            credentials: "same-origin",
-          });
-          if (!response.ok) throw new Error("Refresh failed.");
-          showToast("API key refreshed.");
-          await refreshTableBody();
-        } catch (error) {
-          showToast(error.message || "Refresh failed.");
-        }
-      });
-    });
-
-    document.querySelectorAll("form[data-async-trash]").forEach((form) => {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const formData = new FormData(form);
-        if (!formData.get("csrf_token")) formData.append("csrf_token", csrfToken);
-        const isRestore = formData.get("trashed") === "0";
-        try {
-          const response = await fetch(form.action, {
-            method: "POST",
-            body: formData,
-            credentials: "same-origin",
-          });
-          if (!response.ok) throw new Error("Trash toggle failed.");
-          showToast(isRestore ? "API key restored." : "API key moved to trash.");
-          await refreshTableBody();
-        } catch (error) {
-          showToast(error.message || "Trash toggle failed.");
-        }
-      });
-    });
-  }
-
-  async function submitFormAjax(form) {
-    const formData = new FormData(form);
-    if (!formData.get("csrf_token")) {
-      formData.append("csrf_token", csrfToken);
+      }
+    } catch (error) {
+      showToast(error.message || "Action failed.");
+    } finally {
+      button.disabled = false;
     }
-    const response = await fetch(form.action, {
-      method: "POST",
-      body: formData,
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "Save failed.");
+  });
+
+  keyTableBody?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form[data-row-action]");
+    if (!form) return;
+    event.preventDefault();
+    if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;
+    const submitButton = form.querySelector('[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    if (form.dataset.rowAction === "trash") {
+      let includeInput = form.querySelector('input[name="include_trashed"]');
+      if (!includeInput) {
+        includeInput = document.createElement("input");
+        includeInput.type = "hidden";
+        includeInput.name = "include_trashed";
+        form.append(includeInput);
+      }
+      includeInput.value = trashToggle?.checked ? "1" : "0";
     }
-  }
+    try {
+      const payload = await submitFormAjax(form);
+      reconcileRows([payload]);
+      showToast(payload.message || "Saved.");
+    } catch (error) {
+      showToast(error.message || "Action failed.");
+    } finally {
+      if (submitButton?.isConnected) submitButton.disabled = false;
+    }
+  });
 
   const addKeyDialog = document.getElementById("add-key-dialog");
   const addKeyForm = addKeyDialog?.querySelector("form");
-  if (addKeyForm) {
-    addKeyForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        await submitFormAjax(addKeyForm);
-        addKeyDialog.close();
-        addKeyForm.reset();
-        showToast("API key added.");
-        await refreshTableBody();
-      } catch (error) {
-        showToast(error.message || "Could not add key.");
-      }
+  addKeyForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const payload = await submitFormAjax(addKeyForm);
+      reconcileRows([payload]);
+      addKeyDialog.close();
+      addKeyForm.reset();
+      showToast(payload.message || "API key added.");
+    } catch (error) {
+      showToast(error.message || "Could not add key.");
+    }
+  });
+
+  editForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const payload = await submitFormAjax(editForm);
+      reconcileRows([payload]);
+      editDialog.close();
+      showToast(payload.message || "API key updated.");
+    } catch (error) {
+      showToast(error.message || "Could not update key.");
+    }
+  });
+
+  document.querySelectorAll("form[data-confirm][data-async-skip]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
     });
+  });
+  document.querySelectorAll("[data-auto-submit]").forEach((control) => {
+    control.addEventListener("change", () => control.form?.requestSubmit());
+  });
+
+  document.querySelector("[data-copy-bulk]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const rows = Array.from(rowPairs.values()).map((pair) => pair.row).filter((row) => !row.hidden);
+    if (!rows.length) return showToast("No keys in view to copy.");
+    button.disabled = true;
+    try {
+      const secrets = await Promise.all(rows.map((row) => getSecret(row.dataset.recordId)));
+      await navigator.clipboard.writeText(secrets.join("\n"));
+      showToast(`Copied ${secrets.length} ${secrets.length === 1 ? "key" : "keys"} to clipboard.`);
+    } catch (error) {
+      showToast(error.message || "Bulk copy failed.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector("[data-refresh-bulk]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const ids = Array.from(rowPairs.entries()).filter(([, pair]) => !pair.row.hidden).map(([id]) => id);
+    if (!ids.length) return showToast("No keys in view to refresh.");
+    button.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append("csrf_token", csrfToken);
+      formData.append("record_ids", ids.join(","));
+      const payload = await submitFormAjax("/refresh-all", formData);
+      reconcileRows(payload.rows);
+      showToast(payload.message);
+    } catch (error) {
+      showToast(error.message || "Refresh failed.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  async function reloadTableBody() {
+    if (!keyTableBody) return;
+    const response = await fetch(url.toString(), { headers: { "Accept": "text/html" }, credentials: "same-origin" });
+    if (!response.ok) throw new Error("Could not change the trash view.");
+    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+    const newBody = doc.querySelector("[data-key-table-body]");
+    if (newBody) keyTableBody.replaceChildren(...newBody.childNodes);
+    rebuildRowIndex();
+    applyFilters();
   }
 
-  if (editForm) {
-    editForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        await submitFormAjax(editForm);
-        editDialog.close();
-        showToast("API key updated.");
-        await refreshTableBody();
-      } catch (error) {
-        showToast(error.message || "Could not update key.");
-      }
-    });
-  }
-
-  attachRowActionListeners();
-
-  const copyBulkButton = document.querySelector("[data-copy-bulk]");
-  if (copyBulkButton) {
-    copyBulkButton.addEventListener("click", async () => {
-      if (!keyTableBody) return;
-      const visibleRows = Array.from(
-        keyTableBody.querySelectorAll("tr[data-record-id]")
-      ).filter((row) => !row.hidden);
-      if (visibleRows.length === 0) {
-        showToast("No keys in view to copy.");
-        return;
-      }
-      copyBulkButton.disabled = true;
-      try {
-        const secrets = [];
-        for (const row of visibleRows) {
-          secrets.push(await getSecret(row.dataset.recordId));
-        }
-        await navigator.clipboard.writeText(secrets.join("\n"));
-        const noun = secrets.length === 1 ? "key" : "keys";
-        showToast(`Copied ${secrets.length} ${noun} to clipboard.`);
-      } catch (error) {
-        showToast(error.message || "Bulk copy failed.");
-      } finally {
-        copyBulkButton.disabled = false;
-      }
-    });
-  }
-
-  const refreshBulkButton = document.querySelector("[data-refresh-bulk]");
-  if (refreshBulkButton) {
-    refreshBulkButton.addEventListener("click", async () => {
-      if (!keyTableBody) return;
-      const visibleRows = Array.from(
-        keyTableBody.querySelectorAll("tr[data-record-id]")
-      ).filter((row) => !row.hidden);
-      if (visibleRows.length === 0) {
-        showToast("No keys in view to refresh.");
-        return;
-      }
-      refreshBulkButton.disabled = true;
-      try {
-        const formData = new FormData();
-        formData.append("csrf_token", csrfToken);
-        formData.append(
-          "record_ids",
-          visibleRows.map((row) => row.dataset.recordId).join(",")
-        );
-        const response = await fetch("/refresh-all", {
-          method: "POST",
-          body: formData,
-          credentials: "same-origin",
-        });
-        if (!response.ok) throw new Error("Refresh failed.");
-        const noun = visibleRows.length === 1 ? "key" : "keys";
-        showToast(`Refreshed ${visibleRows.length} ${noun} in view.`);
-        await refreshTableBody();
-      } catch (error) {
-        showToast(error.message || "Refresh failed.");
-      } finally {
-        refreshBulkButton.disabled = false;
-      }
-    });
-  }
-
-  const trashToggle = document.querySelector("[data-trash-toggle]");
-  if (trashToggle) {
-    trashToggle.addEventListener("change", async () => {
-      if (trashToggle.checked) {
-        url.searchParams.set("trashed", "1");
-      } else {
-        url.searchParams.delete("trashed");
-      }
-      window.history.replaceState({}, "", url);
-      await refreshTableBody(url.toString());
-    });
-  }
+  trashToggle?.addEventListener("change", async () => {
+    updateUrlParam("trashed", trashToggle.checked ? "1" : "");
+    try {
+      await reloadTableBody();
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
 
   document.querySelectorAll(".flash-close").forEach((button) => {
     button.addEventListener("click", () => button.closest(".flash")?.remove());
   });
+
+  rebuildRowIndex();
+  initFiltersFromUrl();
 })();

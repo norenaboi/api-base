@@ -202,91 +202,9 @@
               </thead>
               <tbody data-key-table-body>
                 {% for record in records %}
-                  <tr
-                    data-record-id="{{ record.id }}"
-                    data-sort-name="{{ record.name|lower }}"
-                    data-sort-provider="{{ record.typeofkey|lower }}"
-                    data-sort-status="{{ record.status_code if record.status_code is not none else '' }}"
-                    data-models="{{ record.models|join(', ') }}"
-                    data-trashed="{{ '1' if record.trashed else '0' }}"
-                    {% if record.trashed %}class="trashed-row"{% endif %}
-                  >
-                    <td><strong class="record-name" title="{{ record.name }}">{{ record.name }}</strong></td>
-                    <td><span class="provider provider-{{ record.typeofkey }}">{{ record.typeofkey }}</span></td>
-                    <td title="{% if record.last_checked_at %}Checked {{ record.last_checked_at }} UTC{% else %}Not checked yet{% endif %}">
-                      <code class="masked-key" data-secret-display>{{ record.masked_key }}</code>
-                    </td>
-                    <td title="{% if record.last_checked_at %}Checked {{ record.last_checked_at }} UTC{% if record.error_message %} — {{ record.error_message }}{% endif %}{% else %}Not checked yet{% endif %}">
-                      {% if record.status_code is none %}
-                        <span class="status status-unknown">Not checked</span>
-                      {% elif record.status_code >= 200 and record.status_code < 300 %}
-                        <span class="status status-ok">{{ record.status_code }}</span>
-                      {% elif record.status_code == 429 %}
-                        <span class="status status-warn" title="{{ record.error_message or 'Rate limited' }}">{{ record.status_code }}</span>
-                      {% else %}
-                        <span class="status status-error" title="{{ record.error_message or 'Check failed' }}">{{ record.status_code }}</span>
-                      {% endif %}
-                    </td>
-                    <td class="models-cell">
-                      {% if record.models %}
-                        <button type="button" class="model-count" data-toggle-models="{{ record.id }}">{{ record.models|length }} {{ 'model' if record.models|length == 1 else 'models' }} <span aria-hidden="true" class="model-arrow">▾</span></button>
-                      {% else %}
-                        <span class="muted">No models</span>
-                      {% endif %}
-                    </td>
-                    <td><span class="comment-text" title="{{ record.user_comment }}">{{ record.user_comment or '—' }}</span></td>
-                    <td class="col-actions-cell">
-                      <div class="row-actions">
-                        <button type="button" class="mini-button" data-copy-id="{{ record.id }}">Copy</button>
-                        <button type="button" class="mini-button" data-reveal-id="{{ record.id }}" data-masked-key="{{ record.masked_key }}">Reveal</button>
-                        <button
-                          type="button"
-                          class="mini-button"
-                          data-edit-id="{{ record.id }}"
-                          data-edit-name="{{ record.name }}"
-                          data-edit-provider="{{ record.typeofkey }}"
-                          data-edit-status="{{ record.status_code if record.status_code is not none else '' }}"
-                          data-edit-models="{{ record.models|join(', ') }}"
-                          data-edit-check-model="{{ record.check_model or '' }}"
-                          data-edit-comment="{{ record.user_comment }}"
-                        >Edit</button>
-                        <form action="{{ url_for('refresh_one', record_id=record.id) }}" method="post">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <button type="submit" class="mini-button">Refresh</button>
-                        </form>
-                        {% if record.trashed %}
-                        <form action="{{ url_for('trash_key', record_id=record.id) }}" method="post" data-async-trash>
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <input type="hidden" name="trashed" value="0">
-                          <button type="submit" class="mini-button">Restore</button>
-                        </form>
-                        {% else %}
-                        <form action="{{ url_for('trash_key', record_id=record.id) }}" method="post" data-async-trash>
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <input type="hidden" name="trashed" value="1">
-                          <button type="submit" class="mini-button">Trash</button>
-                        </form>
-                        {% endif %}
-                        <form action="{{ url_for('delete_key', record_id=record.id) }}" method="post" data-confirm="Delete '{{ record.name }}'? This cannot be undone.">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <button type="submit" class="mini-button mini-button-danger">Delete</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                  {% if record.models %}
-                  <tr class="model-expansion-row" data-expansion-for="{{ record.id }}" hidden>
-                    <td colspan="7">
-                      <div class="model-expansion-panel">
-                        <ul class="model-list">
-                          {% for model in record.models %}<li><code>{{ model }}</code></li>{% endfor %}
-                        </ul>
-                      </div>
-                    </td>
-                  </tr>
-                  {% endif %}
+                  {% include "_key_rows.html" %}
                 {% else %}
-                  <tr>
+                  <tr data-empty-row>
                     <td colspan="7">
                       <div class="empty-state">
                         <span class="empty-icon" aria-hidden="true">◇</span>
