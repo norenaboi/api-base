@@ -30,7 +30,8 @@ OUTPUT="$DIST/${APP_NAME}-${VERSION}-x86_64.AppImage"
 
 echo "==> Building ${APP_NAME} v${VERSION}"
 
-# ---- 1. PyInstaller ----
+# ---- 1. Desktop dependencies and PyInstaller ----
+"$VENV/bin/pip" install -e ".[gui]"
 if ! "$VENV/bin/python" -c "import PyInstaller" 2>/dev/null; then
   echo "==> Installing PyInstaller"
   "$VENV/bin/pip" install pyinstaller

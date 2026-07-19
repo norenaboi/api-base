@@ -12,11 +12,11 @@ dependencies = [
   "Flask>=3.1,<4",
   "cryptography>=46,<48",
   "httpx>=0.28,<1",
-  "pywebview>=5,<6",
   "waitress>=3,<4",
 ]
 
 [project.optional-dependencies]
+gui = ["pywebview>=5,<6"]
 dev = [
   "pytest>=8.4,<10",
   "pytest-cov>=6,<8",
@@ -26,6 +26,9 @@ dev = [
 [project.scripts]
 api-base = "api_base.__main__:main"
 api-base-gui = "api_base.desktop:main"
+
+[tool.setuptools]
+packages = ["api_base"]
 
 [tool.setuptools.package-data]
 api_base = ["templates/*.html", "static/*.css", "static/*.js"]

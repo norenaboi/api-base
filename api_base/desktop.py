@@ -3,10 +3,8 @@ a native OS window via pywebview. Closing the window exits the process cleanly.
 """
 from __future__ import annotations
 
-import os
 import socket
 import threading
-from pathlib import Path
 
 import webview
 from waitress import serve

@@ -97,12 +97,13 @@ textarea { resize: vertical; min-height: 76px; }
 .clear-filter { padding: 0; border: 0; background: transparent; color: var(--accent-hover); font-size: 12px; text-decoration: none; cursor: pointer; }
 .clear-filter:hover { color: var(--text); }
 .table-wrap { overflow-x: auto; }
-table { width: 100%; min-width: 1305px; border-collapse: collapse; table-layout: fixed; }
+table { width: 100%; min-width: 1580px; border-collapse: collapse; table-layout: fixed; }
 .col-name { width: 450px; }
 .col-provider { width: 120px; }
 .col-key { width: 150px; }
 .col-status { width: 120px; }
 .col-models { width: 118px; }
+.col-comment { width: 260px; }
 .col-actions { width: 360px; }
 th { padding: 10px 13px; border-bottom: 1px solid var(--border-soft); background: #0c111b; color: var(--text-dim); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-align: left; text-transform: uppercase; white-space: nowrap; }
 tbody tr { height: 54px; }

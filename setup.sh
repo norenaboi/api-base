@@ -8,7 +8,7 @@ if [[ ! -x .venv/bin/python ]]; then
 fi
 
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -e ".[gui]"
 mkdir -p data
 
 printf '\nAPI Base is installed. Start it with: ./run.sh\n'

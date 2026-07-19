@@ -1,0 +1,26 @@
+services:
+  api-base:
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    environment:
+      API_BASE_HOST: 0.0.0.0
+      API_BASE_PORT: 8765
+      API_BASE_DATABASE: /data/vault.sqlite3
+      API_BASE_SESSION_SECRET: ${API_BASE_SESSION_SECRET:?Set API_BASE_SESSION_SECRET in .env}
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - api_base_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  api_base_data:
+    name: api_base_data

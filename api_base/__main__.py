@@ -8,6 +8,10 @@ from api_base.web import create_app
 
 
 def main() -> None:
+    host = os.environ.get("API_BASE_HOST", "127.0.0.1").strip()
+    if not host:
+        raise SystemExit("API_BASE_HOST must not be empty.")
+
     port_text = os.environ.get("API_BASE_PORT", "8765")
     try:
         port = int(port_text)
@@ -17,8 +21,8 @@ def main() -> None:
         raise SystemExit("API_BASE_PORT must be between 1 and 65535.")
 
     app = create_app()
-    print(f"API Base is running at http://127.0.0.1:{port}", flush=True)
-    serve(app, host="127.0.0.1", port=port, threads=4)
+    print(f"API Base is running at http://{host}:{port}", flush=True)
+    serve(app, host=host, port=port, threads=4)
 
 
 if __name__ == "__main__":

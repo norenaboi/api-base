@@ -117,6 +117,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         flash(str(error), "error")
         return redirect(url_for("index"))
 
+    @app.get("/healthz")
+    def healthz() -> Any:
+        return jsonify({"status": "ok"})
+
     @app.get("/")
     def index() -> str:
         if not vault().is_initialized():

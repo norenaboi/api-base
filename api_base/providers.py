@@ -27,6 +27,15 @@ class InvalidKeyError(Exception):
     """Raised when a provider rejects the API key."""
 
 
+def _format_amount(value: object) -> str:
+    if value is None:
+        return "N/A"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _auth_headers(provider: str, api_key: str) -> dict[str, str]:
     headers = {
         "Accept": "application/json",
@@ -206,7 +215,7 @@ def _check_deepseek_balance(
         return ProviderResult(200, [], "Provider returned an unreadable balance response.")
 
     parts = [
-        f"{balance.get('total_balance', 'N/A')} {balance.get('currency', '').toFixed(2)}".strip()
+        f"{_format_amount(balance.get('total_balance'))} {balance.get('currency', '')}".strip()
         for balance in data.get("balance_infos", [])
         if isinstance(balance, dict)
     ]
@@ -255,8 +264,7 @@ def _check_openrouter_key(
             period = _OPENROUTER_RESET_PERIODS.get(str(reset).lower(), str(reset))
             limit_part += f"/{period}"
 
-    usage = data.get("usage")
-    total_spent = usage if usage is not None else "N/A"
+    total_spent = _format_amount(data.get("usage"))
 
     comment = f"{tier} tier - {limit_part} - {total_spent}$"
     return ProviderResult(200, [], None, comment)
