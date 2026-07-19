@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>API Base</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body class="state-{{ state }}">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-stack" aria-live="polite">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}" role="status">
+            <span>{{ message }}</span>
+            <button type="button" class="icon-button flash-close" aria-label="Dismiss notification">×</button>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% if state == "setup" %}
+    <main class="auth-shell">
+      <section class="auth-card" aria-labelledby="setup-title">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <p class="eyebrow">LOCAL CREDENTIAL VAULT</p>
+        <h1 id="setup-title">Create your vault</h1>
+        <p class="auth-copy">Choose a master password. API keys are encrypted before they enter the local SQLite database.</p>
+        <div class="security-note"><span aria-hidden="true">◆</span> The password is never written to disk and cannot be recovered.</div>
+        <form action="{{ url_for('setup') }}" method="post" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>
+            <span>Master password</span>
+            <input type="password" name="password" minlength="10" required autocomplete="new-password" autofocus>
+          </label>
+          <label>
+            <span>Confirm password</span>
+            <input type="password" name="password_confirm" minlength="10" required autocomplete="new-password">
+          </label>
+          <button type="submit" class="button button-primary button-full">Create encrypted vault</button>
+        </form>
+        <p class="auth-footnote">Localhost only · AES-256-GCM · SQLite</p>
+      </section>
+    </main>
+  {% elif state == "locked" %}
+    <main class="auth-shell">
+      <section class="auth-card" aria-labelledby="unlock-title">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <p class="eyebrow">API BASE</p>
+        <h1 id="unlock-title">Vault locked</h1>
+        <p class="auth-copy">Enter your master password to decrypt keys for this process only.</p>
+        <form action="{{ url_for('unlock') }}" method="post" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>
+            <span>Master password</span>
+            <input type="password" name="password" required autocomplete="current-password" autofocus>
+          </label>
+          <button type="submit" class="button button-primary button-full">Unlock vault</button>
+        </form>
+        <p class="auth-footnote">Nothing is decrypted until the vault is unlocked.</p>
+      </section>
+    </main>
+  {% else %}
+    <div class="app-shell">
+      <header class="topbar">
+        <a href="{{ url_for('index') }}" class="brand" aria-label="API Base home">
+          <span class="brand-mark brand-mark-small" aria-hidden="true">A</span>
+          <span><strong>API Base</strong><small>Encrypted API-key inventory</small></span>
+        </a>
+        <div class="topbar-actions">
+          <span class="vault-state"><span class="state-dot"></span>Vault unlocked</span>
+          <form action="{{ url_for('lock') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button button-quiet">Lock vault</button>
+          </form>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">KEY MANAGEMENT</p>
+            <h1>API credentials</h1>
+            <p>Store, inspect, and verify provider access from one local workspace.</p>
+          </div>
+          <button type="button" class="button button-primary" data-open-dialog="add-key-dialog">＋ Add API key</button>
+        </section>
+
+        <section class="toolbar-card" aria-label="Vault operations">
+          <div class="toolbar-group">
+            <button type="button" class="button button-secondary" data-refresh-bulk>↻ Refresh in view</button>
+            <form action="{{ url_for('import_json') }}" method="post" enctype="multipart/form-data" class="import-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label class="button button-secondary file-button">
+                ⇧ Import JSON
+                <input type="file" name="file" accept="application/json,.json" required data-auto-submit>
+              </label>
+            </form>
+            <form action="{{ url_for('export_json') }}" method="post" data-confirm="Plain JSON export contains readable API keys. Download it anyway?" data-async-skip>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="button button-secondary">⇩ Export JSON</button>
+            </form>
+            <form action="{{ url_for('export_database') }}" method="post" data-async-skip>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="button button-secondary">▣ Encrypted backup</button>
+            </form>
+            <button type="button" class="button button-secondary" data-copy-bulk>⧉ Copy keys in view</button>
+          </div>
+          <div class="toolbar-meta">
+            <div class="record-count">
+              <strong>{{ records|length }}</strong> keys in view
+            </div>
+            <label class="trash-toggle">
+              <input type="checkbox" data-trash-toggle {% if include_trashed %}checked{% endif %}>
+              <span>Show trashed</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="table-card" aria-labelledby="keys-title">
+          <div class="table-card-header">
+            <div>
+              <h2 id="keys-title">Stored keys</h2>
+              <p>Secrets stay masked until you explicitly copy or reveal one.</p>
+            </div>
+            <div class="model-filter" data-model-filter>
+              <label for="model-search">Filter by model</label>
+              <input
+                id="model-search"
+                type="search"
+                list="model-list"
+                placeholder="Search models…"
+                autocomplete="off"
+              >
+              <datalist id="model-list">
+                {% for model in all_models %}<option value="{{ model }}"></option>{% endfor %}
+              </datalist>
+              <button type="button" class="clear-filter" data-clear-model hidden>Clear</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table data-key-table>
+              <colgroup>
+                <col class="col-name">
+                <col class="col-provider">
+                <col class="col-key">
+                <col class="col-status">
+                <col class="col-models">
+                <col class="col-comment">
+                <col class="col-actions">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th data-sort-header="name" aria-sort="none">
+                    <button type="button" aria-label="Sort by name" class="sort-link" data-sort-key="name">
+                      Name <span aria-hidden="true" data-sort-indicator>↕</span>
+                    </button>
+                  </th>
+                  <th data-sort-header="provider" aria-sort="none">
+                  <div class="header-cell-stack">
+                    <button type="button" aria-label="Sort by provider" class="sort-link" data-sort-key="provider">
+                      Provider <span aria-hidden="true" data-sort-indicator>↕</span>
+                    </button>
+                    <select class="header-filter" data-filter-key="provider" aria-label="Filter by provider">
+                      <option value="">All providers</option>
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="xai">xAI</option>
+                      <option value="huggingface">Hugging Face</option>
+                      <option value="groq">Groq</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="zhipu">Zhipu</option>
+                      <option value="moonshot">Moonshot</option>
+                    </select>
+                  </div>
+                </th>
+                <th>Key</th>
+                <th data-sort-header="status" aria-sort="none">
+                  <div class="header-cell-stack">
+                    <button type="button" aria-label="Sort by status" class="sort-link" data-sort-key="status">
+                      Status <span aria-hidden="true" data-sort-indicator>↕</span>
+                    </button>
+                    <select class="header-filter" data-filter-key="status" aria-label="Filter by status">
+                      <option value="">All statuses</option>
+                      <option value="ok">OK (2xx)</option>
+                      <option value="rate">Rate limit (429)</option>
+                      <option value="error">Error (other)</option>
+                      <option value="unchecked">Not checked</option>
+                    </select>
+                  </div>
+                </th>
+                  <th>Models</th>
+                  <th>Comment</th>
+                  <th class="actions-heading">Actions</th>
+                </tr>
+              </thead>
+              <tbody data-key-table-body>
+                {% for record in records %}
+                  <tr
+                    data-record-id="{{ record.id }}"
+                    data-sort-name="{{ record.name|lower }}"
+                    data-sort-provider="{{ record.typeofkey|lower }}"
+                    data-sort-status="{{ record.status_code if record.status_code is not none else '' }}"
+                    data-models="{{ record.models|join(', ') }}"
+                    data-trashed="{{ '1' if record.trashed else '0' }}"
+                    {% if record.trashed %}class="trashed-row"{% endif %}
+                  >
+                    <td><strong class="record-name" title="{{ record.name }}">{{ record.name }}</strong></td>
+                    <td><span class="provider provider-{{ record.typeofkey }}">{{ record.typeofkey }}</span></td>
+                    <td title="{% if record.last_checked_at %}Checked {{ record.last_checked_at }} UTC{% else %}Not checked yet{% endif %}">
+                      <code class="masked-key" data-secret-display>{{ record.masked_key }}</code>
+                    </td>
+                    <td title="{% if record.last_checked_at %}Checked {{ record.last_checked_at }} UTC{% if record.error_message %} — {{ record.error_message }}{% endif %}{% else %}Not checked yet{% endif %}">
+                      {% if record.status_code is none %}
+                        <span class="status status-unknown">Not checked</span>
+                      {% elif record.status_code >= 200 and record.status_code < 300 %}
+                        <span class="status status-ok">{{ record.status_code }}</span>
+                      {% elif record.status_code == 429 %}
+                        <span class="status status-warn" title="{{ record.error_message or 'Rate limited' }}">{{ record.status_code }}</span>
+                      {% else %}
+                        <span class="status status-error" title="{{ record.error_message or 'Check failed' }}">{{ record.status_code }}</span>
+                      {% endif %}
+                    </td>
+                    <td class="models-cell">
+                      {% if record.models %}
+                        <button type="button" class="model-count" data-toggle-models="{{ record.id }}">{{ record.models|length }} {{ 'model' if record.models|length == 1 else 'models' }} <span aria-hidden="true" class="model-arrow">▾</span></button>
+                      {% else %}
+                        <span class="muted">No models</span>
+                      {% endif %}
+                    </td>
+                    <td><span class="comment-text" title="{{ record.user_comment }}">{{ record.user_comment or '—' }}</span></td>
+                    <td class="col-actions-cell">
+                      <div class="row-actions">
+                        <button type="button" class="mini-button" data-copy-id="{{ record.id }}">Copy</button>
+                        <button type="button" class="mini-button" data-reveal-id="{{ record.id }}" data-masked-key="{{ record.masked_key }}">Reveal</button>
+                        <button
+                          type="button"
+                          class="mini-button"
+                          data-edit-id="{{ record.id }}"
+                          data-edit-name="{{ record.name }}"
+                          data-edit-provider="{{ record.typeofkey }}"
+                          data-edit-status="{{ record.status_code if record.status_code is not none else '' }}"
+                          data-edit-models="{{ record.models|join(', ') }}"
+                          data-edit-check-model="{{ record.check_model or '' }}"
+                          data-edit-comment="{{ record.user_comment }}"
+                        >Edit</button>
+                        <form action="{{ url_for('refresh_one', record_id=record.id) }}" method="post">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <button type="submit" class="mini-button">Refresh</button>
+                        </form>
+                        {% if record.trashed %}
+                        <form action="{{ url_for('trash_key', record_id=record.id) }}" method="post" data-async-trash>
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="trashed" value="0">
+                          <button type="submit" class="mini-button">Restore</button>
+                        </form>
+                        {% else %}
+                        <form action="{{ url_for('trash_key', record_id=record.id) }}" method="post" data-async-trash>
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="trashed" value="1">
+                          <button type="submit" class="mini-button">Trash</button>
+                        </form>
+                        {% endif %}
+                        <form action="{{ url_for('delete_key', record_id=record.id) }}" method="post" data-confirm="Delete '{{ record.name }}'? This cannot be undone.">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <button type="submit" class="mini-button mini-button-danger">Delete</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                  {% if record.models %}
+                  <tr class="model-expansion-row" data-expansion-for="{{ record.id }}" hidden>
+                    <td colspan="7">
+                      <div class="model-expansion-panel">
+                        <ul class="model-list">
+                          {% for model in record.models %}<li><code>{{ model }}</code></li>{% endfor %}
+                        </ul>
+                      </div>
+                    </td>
+                  </tr>
+                  {% endif %}
+                {% else %}
+                  <tr>
+                    <td colspan="7">
+                      <div class="empty-state">
+                        <span class="empty-icon" aria-hidden="true">◇</span>
+                        <h3>No keys in this view</h3>
+                        <p>{% if selected_model %}Clear the model filter or import matching records.{% else %}Add a key or import a JSON file to get started.{% endif %}</p>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="add-key-dialog" class="modal">
+      <form action="{{ url_for('add_key') }}" method="post" class="modal-card">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <div><p class="eyebrow">NEW CREDENTIAL</p><h2>Add API key</h2></div>
+          <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
+        </div>
+        <div class="form-grid">
+          <label><span>Name</span><input name="name" maxlength="200" required autofocus placeholder="Personal, Work, Backup…"></label>
+          <label><span>Provider</span><select name="typeofkey" required><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option></select></label>
+          <label class="full-field"><span>API key</span><input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="Paste the secret value"></label>
+          <label><span>Status code <small>optional</small></span><input type="number" name="status_code" min="100" max="599" placeholder="200"></label>
+          <label><span>Models <small>comma separated</small></span><input name="models" placeholder="model-one, model-two"></label>
+          <label class="full-field"><span>Comment</span><textarea name="user_comment" rows="3" placeholder="What is this key used for?"></textarea></label>
+        </div>
+        <div class="modal-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary">Save key</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="edit-key-dialog" class="modal">
+      <form method="post" class="modal-card" id="edit-key-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <div><p class="eyebrow">EDIT CREDENTIAL</p><h2>Edit API key</h2></div>
+          <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
+        </div>
+        <div class="form-grid">
+          <label><span>Name</span><input name="name" maxlength="200" required data-edit-field="name"></label>
+          <label><span>Provider</span><select name="typeofkey" required data-edit-field="provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option></select></label>
+          <label class="full-field"><span>Replace API key <small>leave blank to keep it</small></span><input type="password" name="key" autocomplete="off" spellcheck="false"></label>
+          <label><span>Status code <small>optional</small></span><input type="number" name="status_code" min="100" max="599" data-edit-field="status"></label>
+          <label><span>Models <small>comma separated</small></span><input name="models" data-edit-field="models"></label>
+          <label><span>Check model <small>for refresh ping</small></span><select name="check_model" data-edit-field="check_model"><option value="">Provider default</option></select></label>
+          <label class="full-field"><span>Comment</span><textarea name="user_comment" rows="3" data-edit-field="comment"></textarea></label>
+        </div>
+        <div class="modal-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary">Save changes</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" role="status" aria-live="polite" hidden></div>
+  {% endif %}
+</body>
+</html>

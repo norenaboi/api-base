@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "api-base"
+version = "0.1.0"
+description = "Local encrypted API-key inventory and model-status dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "Flask>=3.1,<4",
+  "cryptography>=46,<48",
+  "httpx>=0.28,<1",
+  "pywebview>=5,<6",
+  "waitress>=3,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+api-base = "api_base.__main__:main"
+api-base-gui = "api_base.desktop:main"
+
+[tool.setuptools.package-data]
+api_base = ["templates/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]

@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "name": "Personal",
+      "typeofkey": "openai",
+      "key": "replace-with-your-api-key",
+      "status_code": null,
+      "models": [],
+      "user_comment": "Example record"
+    }
+  ]
+}
