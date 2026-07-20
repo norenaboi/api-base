@@ -467,9 +467,77 @@ class Vault:
     def list_models(self) -> list[str]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT models_json FROM api_keys WHERE trashed = 0"
+                """
+                SELECT DISTINCT CAST(json_each.value AS TEXT) AS model
+                FROM api_keys, json_each(api_keys.models_json)
+                WHERE api_keys.trashed = 0
+                """
             ).fetchall()
-        return sorted({str(model) for row in rows for model in json.loads(row["models_json"])})
+        return sorted(row["model"] for row in rows)
+
+    @staticmethod
+    def _key_filters(
+        *,
+        model: str | None,
+        key_type: str | None,
+        status: str | None,
+        status_code: int | None,
+        include_trashed: bool,
+    ) -> tuple[str, list[object]]:
+        conditions: list[str] = []
+        parameters: list[object] = []
+        if not include_trashed:
+            conditions.append("api_keys.trashed = 0")
+        if model:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(api_keys.models_json) "
+                "WHERE instr(lower(CAST(value AS TEXT)), lower(?)) > 0)"
+            )
+            parameters.append(model)
+        if key_type:
+            conditions.append("api_keys.key_type = ?")
+            parameters.append(key_type)
+        if status_code is not None:
+            conditions.append("api_keys.status_code = ?")
+            parameters.append(status_code)
+        elif status:
+            status_conditions = {
+                "ok": "api_keys.status_code BETWEEN 200 AND 299",
+                "rate": "api_keys.status_code = 429",
+                "error": (
+                    "api_keys.status_code IS NOT NULL AND api_keys.status_code != 429 "
+                    "AND (api_keys.status_code < 200 OR api_keys.status_code >= 300)"
+                ),
+                "unchecked": "api_keys.status_code IS NULL",
+            }
+            if status not in status_conditions:
+                raise ValueError(f"Unsupported status filter: {status}")
+            conditions.append(status_conditions[status])
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, parameters
+
+    def count_keys(
+        self,
+        *,
+        model: str | None = None,
+        key_type: str | None = None,
+        status: str | None = None,
+        status_code: int | None = None,
+        include_trashed: bool = False,
+    ) -> int:
+        where_clause, parameters = self._key_filters(
+            model=model,
+            key_type=key_type,
+            status=status,
+            status_code=status_code,
+            include_trashed=include_trashed,
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS count FROM api_keys {where_clause}",  # noqa: S608
+                parameters,
+            ).fetchone()
+        return int(row["count"])
 
     def list_keys(
         self,
@@ -478,8 +546,11 @@ class Vault:
         direction: str = "asc",
         model: str | None = None,
         key_type: str | None = None,
+        status: str | None = None,
         status_code: int | None = None,
         include_trashed: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[dict[str, object]]:
         sort_columns = {
             "id": "api_keys.id",
@@ -493,28 +564,26 @@ class Vault:
         normalized_direction = direction.lower()
         if normalized_direction not in {"asc", "desc"}:
             raise ValueError(f"Unsupported sort direction: {direction}")
+        if limit is not None and limit < 1:
+            raise ValueError("Limit must be positive.")
+        if offset < 0:
+            raise ValueError("Offset cannot be negative.")
 
-        conditions: list[str] = []
-        parameters: list[object] = []
-        if not include_trashed:
-            conditions.append("api_keys.trashed = 0")
-        if model:
-            conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(api_keys.models_json) WHERE value = ?)"
-            )
-            parameters.append(model)
-        if key_type:
-            conditions.append("api_keys.key_type = ?")
-            parameters.append(key_type)
-        if status_code is not None:
-            conditions.append("api_keys.status_code = ?")
-            parameters.append(status_code)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause, parameters = self._key_filters(
+            model=model,
+            key_type=key_type,
+            status=status,
+            status_code=status_code,
+            include_trashed=include_trashed,
+        )
         sort_column = sort_columns[sort_by]
         nulls_last = (
             "(api_keys.status_code IS NULL) ASC, " if sort_by == "status_code" else ""
         )
+        pagination = ""
+        if limit is not None:
+            pagination = "LIMIT ? OFFSET ?"
+            parameters.extend((limit, offset))
         query = (
             f"""
             SELECT id, name, key_type, key_first_four, key_last_four, status_code, models_json,
@@ -523,6 +592,7 @@ class Vault:
             FROM api_keys
             {where_clause}
             ORDER BY {nulls_last}{sort_column} {normalized_direction.upper()}, api_keys.id ASC
+            {pagination}
             """  # noqa: S608
         )
 

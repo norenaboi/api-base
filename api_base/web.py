@@ -109,6 +109,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         }
 
     def row_payload(record_id: int, *, message: str = "") -> Any:
+        if request.headers.get("X-Reload-After-Mutation") == "1":
+            return jsonify({"message": message})
         return jsonify({**row_data(record_id), "message": message})
 
     def mutation_error(error: Exception, status: int = 400) -> Any:
@@ -128,29 +130,68 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if unlocked_keys() is None:
             return render_template("index.html", state="locked")
 
-        sort_by = request.args.get("sort", "id")
-        direction = request.args.get("direction", "asc")
-        model = request.args.get("model") or None
+        page_size = 100
+        sort_aliases = {"provider": "typeofkey", "status": "status_code"}
+        requested_sort = request.args.get("sort", "id")
+        sort_by = sort_aliases.get(requested_sort, requested_sort)
+        direction = request.args.get("direction", "asc").lower()
+        model = request.args.get("model", "").strip()
+        provider = request.args.get("provider", "").strip().lower()
+        status = request.args.get("status", "").strip().lower()
         include_trashed = request.args.get("trashed", "") == "1"
         try:
-            records = vault().list_keys(
-                sort_by=sort_by, direction=direction, model=model,
-                include_trashed=include_trashed,
-            )
+            page = max(1, int(request.args.get("page", "1")))
         except ValueError:
-            records = vault().list_keys(include_trashed=include_trashed)
+            page = 1
+
+        query_options = {
+            "model": model or None,
+            "key_type": provider or None,
+            "status": status or None,
+            "include_trashed": include_trashed,
+        }
+
+        def load_page() -> tuple[list[dict[str, object]], int, int, int]:
+            total = vault().count_keys(**query_options)
+            pages = max(1, (total + page_size - 1) // page_size)
+            current_page = min(page, pages)
+            page_records = vault().list_keys(
+                sort_by=sort_by,
+                direction=direction,
+                limit=page_size,
+                offset=(current_page - 1) * page_size,
+                **query_options,
+            )
+            return page_records, total, pages, current_page
+
+        try:
+            records, total_records, total_pages, page = load_page()
+        except ValueError:
             sort_by = "id"
             direction = "asc"
-        all_models = vault().list_models()
+            provider = ""
+            status = ""
+            query_options.update(key_type=None, status=None)
+            records, total_records, total_pages, page = load_page()
+
+        page_start = (page - 1) * page_size + 1 if total_records else 0
+        page_end = min(page * page_size, total_records)
         return render_template(
             "index.html",
             state="unlocked",
             records=records,
-            all_models=all_models,
-            selected_model=model or "",
+            all_models=vault().list_models(),
+            selected_model=model,
+            selected_provider=provider,
+            selected_status=status,
             sort_by=sort_by,
             direction=direction,
             include_trashed=include_trashed,
+            page=page,
+            total_pages=total_pages,
+            total_records=total_records,
+            page_start=page_start,
+            page_end=page_end,
         )
 
     @app.post("/setup")

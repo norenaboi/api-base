@@ -111,7 +111,8 @@
           </div>
           <div class="toolbar-meta">
             <div class="record-count">
-              <strong>{{ records|length }}</strong> keys in view
+              <strong>{{ total_records }}</strong> matching {{ 'key' if total_records == 1 else 'keys' }}
+              {% if total_records %} · {{ page_start }}–{{ page_end }} in view{% endif %}
             </div>
             <label class="trash-toggle">
               <input type="checkbox" data-trash-toggle {% if include_trashed %}checked{% endif %}>
@@ -134,6 +135,7 @@
                 list="model-list"
                 placeholder="Search models…"
                 autocomplete="off"
+                value="{{ selected_model }}"
               >
               <datalist id="model-list">
                 {% for model in all_models %}<option value="{{ model }}"></option>{% endfor %}
@@ -155,43 +157,43 @@
               </colgroup>
               <thead>
                 <tr>
-                  <th data-sort-header="name" aria-sort="none">
+                  <th data-sort-header="name" aria-sort="{{ 'ascending' if sort_by == 'name' and direction == 'asc' else 'descending' if sort_by == 'name' else 'none' }}">
                     <button type="button" aria-label="Sort by name" class="sort-link" data-sort-key="name">
-                      Name <span aria-hidden="true" data-sort-indicator>↕</span>
+                      Name <span aria-hidden="true" data-sort-indicator>{{ '↑' if sort_by == 'name' and direction == 'asc' else '↓' if sort_by == 'name' else '↕' }}</span>
                     </button>
                   </th>
-                  <th data-sort-header="provider" aria-sort="none">
+                  <th data-sort-header="provider" aria-sort="{{ 'ascending' if sort_by == 'typeofkey' and direction == 'asc' else 'descending' if sort_by == 'typeofkey' else 'none' }}">
                   <div class="header-cell-stack">
                     <button type="button" aria-label="Sort by provider" class="sort-link" data-sort-key="provider">
-                      Provider <span aria-hidden="true" data-sort-indicator>↕</span>
+                      Provider <span aria-hidden="true" data-sort-indicator>{{ '↑' if sort_by == 'typeofkey' and direction == 'asc' else '↓' if sort_by == 'typeofkey' else '↕' }}</span>
                     </button>
                     <select class="header-filter" data-filter-key="provider" aria-label="Filter by provider">
                       <option value="">All providers</option>
-                      <option value="deepseek">DeepSeek</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="xai">xAI</option>
-                      <option value="huggingface">Hugging Face</option>
-                      <option value="groq">Groq</option>
-                      <option value="openrouter">OpenRouter</option>
-                      <option value="zhipu">Zhipu</option>
-                      <option value="moonshot">Moonshot</option>
+                      <option value="deepseek" {% if selected_provider == 'deepseek' %}selected{% endif %}>DeepSeek</option>
+                      <option value="openai" {% if selected_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                      <option value="anthropic" {% if selected_provider == 'anthropic' %}selected{% endif %}>Anthropic</option>
+                      <option value="gemini" {% if selected_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                      <option value="xai" {% if selected_provider == 'xai' %}selected{% endif %}>xAI</option>
+                      <option value="huggingface" {% if selected_provider == 'huggingface' %}selected{% endif %}>Hugging Face</option>
+                      <option value="groq" {% if selected_provider == 'groq' %}selected{% endif %}>Groq</option>
+                      <option value="openrouter" {% if selected_provider == 'openrouter' %}selected{% endif %}>OpenRouter</option>
+                      <option value="zhipu" {% if selected_provider == 'zhipu' %}selected{% endif %}>Zhipu</option>
+                      <option value="moonshot" {% if selected_provider == 'moonshot' %}selected{% endif %}>Moonshot</option>
                     </select>
                   </div>
                 </th>
                 <th>Key</th>
-                <th data-sort-header="status" aria-sort="none">
+                <th data-sort-header="status" aria-sort="{{ 'ascending' if sort_by == 'status_code' and direction == 'asc' else 'descending' if sort_by == 'status_code' else 'none' }}">
                   <div class="header-cell-stack">
                     <button type="button" aria-label="Sort by status" class="sort-link" data-sort-key="status">
-                      Status <span aria-hidden="true" data-sort-indicator>↕</span>
+                      Status <span aria-hidden="true" data-sort-indicator>{{ '↑' if sort_by == 'status_code' and direction == 'asc' else '↓' if sort_by == 'status_code' else '↕' }}</span>
                     </button>
                     <select class="header-filter" data-filter-key="status" aria-label="Filter by status">
                       <option value="">All statuses</option>
-                      <option value="ok">OK (2xx)</option>
-                      <option value="rate">Rate limit (429)</option>
-                      <option value="error">Error (other)</option>
-                      <option value="unchecked">Not checked</option>
+                      <option value="ok" {% if selected_status == 'ok' %}selected{% endif %}>OK (2xx)</option>
+                      <option value="rate" {% if selected_status == 'rate' %}selected{% endif %}>Rate limit (429)</option>
+                      <option value="error" {% if selected_status == 'error' %}selected{% endif %}>Error (other)</option>
+                      <option value="unchecked" {% if selected_status == 'unchecked' %}selected{% endif %}>Not checked</option>
                     </select>
                   </div>
                 </th>
@@ -217,6 +219,21 @@
               </tbody>
             </table>
           </div>
+          {% if total_pages > 1 %}
+            <nav class="pagination" aria-label="Key pages">
+              {% if page > 1 %}
+                <a class="button button-secondary" href="{{ url_for('index', page=page - 1, sort=sort_by, direction=direction, model=selected_model, provider=selected_provider, status=selected_status, trashed='1' if include_trashed else '') }}">← Previous</a>
+              {% else %}
+                <span class="button button-secondary pagination-disabled" aria-disabled="true">← Previous</span>
+              {% endif %}
+              <span>Page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong></span>
+              {% if page < total_pages %}
+                <a class="button button-secondary" href="{{ url_for('index', page=page + 1, sort=sort_by, direction=direction, model=selected_model, provider=selected_provider, status=selected_status, trashed='1' if include_trashed else '') }}">Next →</a>
+              {% else %}
+                <span class="button button-secondary pagination-disabled" aria-disabled="true">Next →</span>
+              {% endif %}
+            </nav>
+          {% endif %}
         </section>
       </main>
     </div>

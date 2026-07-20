@@ -159,6 +159,9 @@ td.col-actions-cell { white-space: normal; }
 .empty-icon { display: block; color: var(--text-dim); font-size: 34px; }
 .empty-state h3 { margin: 10px 0 4px; }
 .empty-state p { margin: 0; color: var(--text-dim); }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--border-soft); color: var(--text-muted); font-size: 12px; }
+.pagination strong { color: var(--text); }
+.pagination-disabled { cursor: default; opacity: .45; pointer-events: none; }
 
 .flash-stack { position: fixed; top: 76px; right: 20px; z-index: 100; display: grid; gap: 8px; width: min(400px, calc(100vw - 40px)); }
 .flash { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--shadow); color: #d5dce9; font-size: 12px; transition: opacity .2s, transform .2s; }

@@ -7,12 +7,9 @@
   const modelSearch = document.getElementById("model-search");
   const clearModelButton = document.querySelector("[data-clear-model]");
   const headerFilters = document.querySelectorAll("[data-filter-key]");
-  const recordCount = document.querySelector(".record-count strong");
   const trashToggle = document.querySelector("[data-trash-toggle]");
   const url = new URL(window.location.href);
   const rowPairs = new Map();
-  const textSorter = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-  let activeSort = { key: "", direction: "asc" };
   let filterTimeoutId;
 
   function showToast(message) {
@@ -57,121 +54,42 @@
         expansionRow: expansionRows.get(row.dataset.recordId) || null,
       });
     });
-    updateRecordCount();
   }
 
-  function updateRecordCount() {
-    if (recordCount) recordCount.textContent = String(rowPairs.size);
-    if (!keyTableBody) return;
-    const emptyRow = keyTableBody.querySelector("[data-empty-row]");
-    if (rowPairs.size && emptyRow) emptyRow.remove();
-    if (!rowPairs.size && !emptyRow) {
-      keyTableBody.insertAdjacentHTML(
-        "beforeend",
-        '<tr data-empty-row><td colspan="7"><div class="empty-state"><span class="empty-icon" aria-hidden="true">◇</span><h3>No keys in this view</h3><p>Add a key or adjust the current filters.</p></div></td></tr>'
-      );
-    }
-  }
-
-  function updateUrlParam(key, value) {
+  function navigateWithParam(key, value) {
     if (value) url.searchParams.set(key, value);
     else url.searchParams.delete(key);
-    window.history.replaceState({}, "", url);
+    url.searchParams.delete("page");
+    window.location.assign(url.toString());
   }
 
-  function matchesStatusFilter(rowValue, filterValue) {
-    if (filterValue === "") return true;
-    if (filterValue === "unchecked") return rowValue === "";
-    const code = Number(rowValue);
-    if (Number.isNaN(code)) return false;
-    if (filterValue === "ok") return code >= 200 && code < 300;
-    if (filterValue === "rate") return code === 429;
-    if (filterValue === "error") return code !== 429 && (code < 200 || code >= 300);
-    return true;
-  }
-
-  function applyFilters() {
-    const modelTerm = modelSearch ? modelSearch.value.trim().toLowerCase() : "";
-    const providerFilter = document.querySelector('[data-filter-key="provider"]')?.value || "";
-    const statusFilter = document.querySelector('[data-filter-key="status"]')?.value || "";
-    if (clearModelButton) clearModelButton.hidden = modelTerm === "";
-
-    rowPairs.forEach(({ row, expansionRow }) => {
-      const matchesModel = modelTerm === "" || (row.dataset.models || "").toLowerCase().includes(modelTerm);
-      const matchesProvider = providerFilter === "" || (row.dataset.sortProvider || "").toLowerCase() === providerFilter;
-      const visible = matchesModel && matchesProvider && matchesStatusFilter(row.dataset.sortStatus || "", statusFilter);
-      row.hidden = !visible;
-      if (expansionRow && !visible) expansionRow.hidden = true;
-    });
-  }
-
-  function initFiltersFromUrl() {
-    if (modelSearch) modelSearch.value = url.searchParams.get("model") || "";
-    headerFilters.forEach((select) => {
-      select.value = url.searchParams.get(select.dataset.filterKey) || "";
-    });
-    applyFilters();
-  }
-
+  if (clearModelButton) clearModelButton.hidden = !modelSearch?.value.trim();
   if (modelSearch) {
     modelSearch.addEventListener("input", () => {
       window.clearTimeout(filterTimeoutId);
       filterTimeoutId = window.setTimeout(() => {
-        updateUrlParam("model", modelSearch.value.trim());
-        applyFilters();
-      }, 150);
+        navigateWithParam("model", modelSearch.value.trim());
+      }, 300);
     });
   }
-  clearModelButton?.addEventListener("click", () => {
-    if (modelSearch) modelSearch.value = "";
-    updateUrlParam("model", "");
-    applyFilters();
-    modelSearch?.focus();
-  });
+  clearModelButton?.addEventListener("click", () => navigateWithParam("model", ""));
   headerFilters.forEach((select) => {
-    select.addEventListener("change", () => {
-      updateUrlParam(select.dataset.filterKey, select.value);
-      applyFilters();
-    });
+    select.addEventListener("change", () => navigateWithParam(select.dataset.filterKey, select.value));
   });
-
-  function sortValue(row, key) {
-    return row.dataset[`sort${key.charAt(0).toUpperCase()}${key.slice(1)}`] ?? "";
-  }
-
-  function sortCurrentRows() {
-    if (!keyTableBody || !activeSort.key) return;
-    const multiplier = activeSort.direction === "asc" ? 1 : -1;
-    const pairs = Array.from(rowPairs.values());
-    pairs.sort(({ row: rowA }, { row: rowB }) => {
-      const valueA = sortValue(rowA, activeSort.key);
-      const valueB = sortValue(rowB, activeSort.key);
-      if (activeSort.key === "status") {
-        if (valueA === "" && valueB === "") return 0;
-        if (valueA === "") return 1;
-        if (valueB === "") return -1;
-        return (Number(valueA) - Number(valueB)) * multiplier;
-      }
-      return textSorter.compare(valueA, valueB) * multiplier;
-    });
-    for (const { row, expansionRow } of pairs) {
-      keyTableBody.append(row);
-      if (expansionRow) keyTableBody.append(expansionRow);
-    }
-  }
 
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.sortKey;
-      const direction = activeSort.key === key && activeSort.direction === "asc" ? "desc" : "asc";
-      activeSort = { key, direction };
-      sortCurrentRows();
-      document.querySelectorAll("[data-sort-header]").forEach((header) => {
-        const isActive = header.dataset.sortHeader === key;
-        header.setAttribute("aria-sort", isActive ? (direction === "asc" ? "ascending" : "descending") : "none");
-        const indicator = header.querySelector("[data-sort-indicator]");
-        if (indicator) indicator.textContent = isActive ? (direction === "asc" ? "↑" : "↓") : "↕";
-      });
+      const backendKey = key === "provider" ? "typeofkey" : key === "status" ? "status_code" : key;
+      const currentKey = url.searchParams.get("sort") || "id";
+      const currentDirection = url.searchParams.get("direction") || "asc";
+      url.searchParams.set("sort", backendKey);
+      url.searchParams.set(
+        "direction",
+        currentKey === backendKey && currentDirection === "asc" ? "desc" : "asc"
+      );
+      url.searchParams.delete("page");
+      window.location.assign(url.toString());
     });
   });
 
@@ -186,13 +104,19 @@
     return payload.key;
   }
 
-  async function submitFormAjax(formOrAction, suppliedFormData = null) {
+  async function submitFormAjax(
+    formOrAction,
+    suppliedFormData = null,
+    { reloadAfterMutation = false } = {}
+  ) {
     const action = typeof formOrAction === "string" ? formOrAction : formOrAction.action;
     const formData = suppliedFormData || new FormData(formOrAction);
     if (!formData.get("csrf_token")) formData.append("csrf_token", csrfToken);
+    const headers = { "Accept": "application/json" };
+    if (reloadAfterMutation) headers["X-Reload-After-Mutation"] = "1";
     const response = await fetch(action, {
       method: "POST",
-      headers: { "Accept": "application/json" },
+      headers,
       body: formData,
       credentials: "same-origin",
     });
@@ -228,22 +152,16 @@
     const pair = parseRowFragment(payload.html);
     const recordId = String(pair.row.dataset.recordId);
     const oldPair = rowPairs.get(recordId);
-    if (oldPair) {
-      oldPair.expansionRow?.remove();
-      oldPair.row.replaceWith(pair.row);
-      if (pair.expansionRow) pair.row.after(pair.expansionRow);
-    } else {
-      keyTableBody?.append(pair.row);
-      if (pair.expansionRow) keyTableBody?.append(pair.expansionRow);
-    }
+    if (!oldPair) return;
+    oldPair.expansionRow?.remove();
+    oldPair.row.replaceWith(pair.row);
+    if (pair.expansionRow) pair.row.after(pair.expansionRow);
     rowPairs.set(recordId, pair);
   }
 
   function reconcileRows(payloads) {
     payloads.forEach(applyRowPayload);
-    updateRecordCount();
-    applyFilters();
-    sortCurrentRows();
+    rebuildRowIndex();
   }
 
   const editDialog = document.getElementById("edit-key-dialog");
@@ -326,9 +244,16 @@
       includeInput.value = trashToggle?.checked ? "1" : "0";
     }
     try {
-      const payload = await submitFormAjax(form);
-      reconcileRows([payload]);
-      showToast(payload.message || "Saved.");
+      const updateInPlace = ["refresh", "trash"].includes(form.dataset.rowAction);
+      const payload = await submitFormAjax(form, null, {
+        reloadAfterMutation: !updateInPlace,
+      });
+      if (updateInPlace) {
+        reconcileRows([payload]);
+        showToast(payload.message || "Saved.");
+      } else {
+        window.location.reload();
+      }
     } catch (error) {
       showToast(error.message || "Action failed.");
     } finally {
@@ -341,11 +266,8 @@
   addKeyForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const payload = await submitFormAjax(addKeyForm);
-      reconcileRows([payload]);
-      addKeyDialog.close();
-      addKeyForm.reset();
-      showToast(payload.message || "API key added.");
+      await submitFormAjax(addKeyForm, null, { reloadAfterMutation: true });
+      window.location.reload();
     } catch (error) {
       showToast(error.message || "Could not add key.");
     }
@@ -354,10 +276,8 @@
   editForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const payload = await submitFormAjax(editForm);
-      reconcileRows([payload]);
-      editDialog.close();
-      showToast(payload.message || "API key updated.");
+      await submitFormAjax(editForm, null, { reloadAfterMutation: true });
+      window.location.reload();
     } catch (error) {
       showToast(error.message || "Could not update key.");
     }
@@ -372,13 +292,27 @@
     control.addEventListener("change", () => control.form?.requestSubmit());
   });
 
+  async function revealInOrder(rows, concurrency = 4) {
+    const secrets = new Array(rows.length);
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < rows.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        secrets[index] = await getSecret(rows[index].dataset.recordId);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
+    return secrets;
+  }
+
   document.querySelector("[data-copy-bulk]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
-    const rows = Array.from(rowPairs.values()).map((pair) => pair.row).filter((row) => !row.hidden);
+    const rows = Array.from(rowPairs.values(), (pair) => pair.row);
     if (!rows.length) return showToast("No keys in view to copy.");
     button.disabled = true;
     try {
-      const secrets = await Promise.all(rows.map((row) => getSecret(row.dataset.recordId)));
+      const secrets = await revealInOrder(rows);
       await navigator.clipboard.writeText(secrets.join("\n"));
       showToast(`Copied ${secrets.length} ${secrets.length === 1 ? "key" : "keys"} to clipboard.`);
     } catch (error) {
@@ -390,7 +324,7 @@
 
   document.querySelector("[data-refresh-bulk]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
-    const ids = Array.from(rowPairs.entries()).filter(([, pair]) => !pair.row.hidden).map(([id]) => id);
+    const ids = Array.from(rowPairs.keys());
     if (!ids.length) return showToast("No keys in view to refresh.");
     button.disabled = true;
     try {
@@ -407,24 +341,8 @@
     }
   });
 
-  async function reloadTableBody() {
-    if (!keyTableBody) return;
-    const response = await fetch(url.toString(), { headers: { "Accept": "text/html" }, credentials: "same-origin" });
-    if (!response.ok) throw new Error("Could not change the trash view.");
-    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
-    const newBody = doc.querySelector("[data-key-table-body]");
-    if (newBody) keyTableBody.replaceChildren(...newBody.childNodes);
-    rebuildRowIndex();
-    applyFilters();
-  }
-
-  trashToggle?.addEventListener("change", async () => {
-    updateUrlParam("trashed", trashToggle.checked ? "1" : "");
-    try {
-      await reloadTableBody();
-    } catch (error) {
-      showToast(error.message);
-    }
+  trashToggle?.addEventListener("change", () => {
+    navigateWithParam("trashed", trashToggle.checked ? "1" : "");
   });
 
   document.querySelectorAll(".flash-close").forEach((button) => {
@@ -432,5 +350,4 @@
   });
 
   rebuildRowIndex();
-  initFiltersFromUrl();
 })();
