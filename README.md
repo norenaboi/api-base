@@ -160,13 +160,13 @@ cp /path/to/api-base-vault.sqlite3 /path/to/api-base/data/vault.sqlite3
 
 ## Provider refresh behavior
 
-Refresh calls the provider's model-list endpoint using the selected key. The app stores:
+Refresh fetches the provider's model list, then performs a minimal inference health check. OpenAI checks use `POST /v1/responses` with a low-cost default model unless a check model is selected. The app stores:
 
-- the HTTP response status (`200`, `401`, `402`, `429`, and so on)
-- model identifiers returned by the provider
+- the health-check HTTP status (`200`, `401`, `403`, `429`, and so on)
+- model identifiers returned by the independent model-list request
 - the last-check timestamp
 
-Transport and provider errors are shown without logging or displaying the API key.
+Transport and provider errors are shown without logging or displaying the API key. An OpenAI `429` can mean temporary rate limiting or exhausted billing/quota; it does not by itself mean the key is invalid.
 
 ## Configuration
 

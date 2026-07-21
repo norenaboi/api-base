@@ -70,11 +70,12 @@ def _auth_headers(provider: str, api_key: str) -> dict[str, str]:
 def _minimal_chat_payload(provider: str, model: str | None = None) -> tuple[str, dict[str, object]]:
     if provider == "openai":
         return (
-            "https://api.openai.com/v1/chat/completions",
+            "https://api.openai.com/v1/responses",
             {
-                "model": model or "gpt-5.5",
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 1,
+                "model": model or "gpt-4.1-nano",
+                "input": "ping",
+                "max_output_tokens": 16,
+                "store": False,
             },
         )
     if provider == "anthropic":
@@ -161,16 +162,18 @@ def _classify_error(provider: str, response: httpx.Response) -> str:
     elif isinstance(payload, dict) and "error" in payload:
         error_message = str(payload["error"]).lower()
 
-    if response.status_code == 429:
-        return "rate_limited"
-    if response.status_code == 401 or response.status_code == 403:
-        return "invalid_key"
     if (
         response.status_code == 402
         or "insufficient_quota" in error_message
         or "quota" in error_message
     ):
         return "quota_exhausted"
+    if response.status_code == 429:
+        return "rate_limited"
+    if response.status_code == 401:
+        return "invalid_key"
+    if response.status_code == 403:
+        return "forbidden"
     if response.status_code >= 500:
         return "server_error"
     if response.status_code >= 400:
@@ -183,6 +186,7 @@ def _failure_result(provider: str, response: httpx.Response) -> ProviderResult:
     messages = {
         "rate_limited": "Rate limited. Slow down and retry later.",
         "invalid_key": "Invalid or revoked API key.",
+        "forbidden": "API key is valid but access to this model or resource is forbidden.",
         "quota_exhausted": "Quota exhausted. Add credits or switch key.",
         "server_error": "Provider server error.",
         "client_error": f"Provider returned HTTP {response.status_code}.",
