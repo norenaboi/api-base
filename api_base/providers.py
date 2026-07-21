@@ -72,7 +72,7 @@ def _minimal_chat_payload(provider: str, model: str | None = None) -> tuple[str,
         return (
             "https://api.openai.com/v1/responses",
             {
-                "model": model or "gpt-4.1-nano",
+                "model": model or "gpt-5.5",
                 "input": "ping",
                 "max_output_tokens": 16,
                 "store": False,
@@ -124,7 +124,7 @@ def _minimal_chat_payload(provider: str, model: str | None = None) -> tuple[str,
             },
         )
     if provider == "gemini":
-        model_name = model or "gemini-3.1-pro-preview"
+        model_name = model or "gemini-2.5-flash"
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         )

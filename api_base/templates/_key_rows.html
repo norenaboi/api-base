@@ -3,7 +3,6 @@
   data-sort-name="{{ record.name|lower }}"
   data-sort-provider="{{ record.typeofkey|lower }}"
   data-sort-status="{{ record.status_code if record.status_code is not none else '' }}"
-  data-models="{{ record.models|join(', ') }}"
   data-trashed="{{ '1' if record.trashed else '0' }}"
   {% if record.trashed %}class="trashed-row"{% endif %}
 >
@@ -25,7 +24,7 @@
   </td>
   <td class="models-cell">
     {% if record.models %}
-      <button type="button" class="model-count" data-toggle-models="{{ record.id }}">{{ record.models|length }} {{ 'model' if record.models|length == 1 else 'models' }} <span aria-hidden="true" class="model-arrow">▾</span></button>
+      <button type="button" class="model-count" data-toggle-models="{{ record.id }}" aria-expanded="false">{{ record.models|length }} {{ 'model' if record.models|length == 1 else 'models' }} <span aria-hidden="true" class="model-arrow">▾</span></button>
     {% else %}
       <span class="muted">No models</span>
     {% endif %}
@@ -62,14 +61,3 @@
     </div>
   </td>
 </tr>
-{% if record.models %}
-<tr class="model-expansion-row" data-expansion-for="{{ record.id }}" hidden>
-  <td colspan="7">
-    <div class="model-expansion-panel">
-      <ul class="model-list">
-        {% for model in record.models %}<li><code>{{ model }}</code></li>{% endfor %}
-      </ul>
-    </div>
-  </td>
-</tr>
-{% endif %}

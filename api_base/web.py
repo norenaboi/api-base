@@ -345,6 +345,15 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return jsonify({"error": str(error)}), 404
         return jsonify({"key": api_key})
 
+    @app.post("/keys/<int:record_id>/models")
+    @require_unlocked
+    def key_models(record_id: int) -> Any:
+        try:
+            models = vault().get_models(record_id)
+        except VaultError as error:
+            return jsonify({"error": str(error)}), 404
+        return jsonify({"models": models})
+
     @app.post("/keys/copy-provider")
     @require_unlocked
     def copy_provider_keys() -> Any:

@@ -109,6 +109,44 @@
     return payload.key;
   }
 
+  async function getModels(recordId) {
+    const response = await fetch(`/keys/${recordId}/models`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": csrfToken, "Accept": "application/json" },
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(payload.models)) {
+      throw new Error(payload.error || "Could not load models for this key.");
+    }
+    return payload.models;
+  }
+
+  function createModelExpansionRow(recordId, models) {
+    const row = document.createElement("tr");
+    row.className = "model-expansion-row";
+    row.dataset.expansionFor = recordId;
+    row.hidden = true;
+
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    const panel = document.createElement("div");
+    panel.className = "model-expansion-panel";
+    const list = document.createElement("ul");
+    list.className = "model-list";
+    models.forEach((model) => {
+      const item = document.createElement("li");
+      const code = document.createElement("code");
+      code.textContent = model;
+      item.append(code);
+      list.append(item);
+    });
+    panel.append(list);
+    cell.append(panel);
+    row.append(cell);
+    return row;
+  }
+
   async function submitFormAjax(
     formOrAction,
     suppliedFormData = null,
@@ -198,11 +236,28 @@
     if (!button || !keyTableBody.contains(button)) return;
     if (button.dataset.editId) return populateEditDialog(button);
     if (button.dataset.toggleModels) {
-      const expansionRow = rowPairs.get(button.dataset.toggleModels)?.expansionRow;
-      if (!expansionRow) return;
-      const isOpen = !expansionRow.hidden;
-      expansionRow.hidden = isOpen;
-      button.setAttribute("aria-expanded", String(!isOpen));
+      const recordId = button.dataset.toggleModels;
+      const pair = rowPairs.get(recordId);
+      if (!pair) return;
+      if (pair.expansionRow) {
+        const isOpen = !pair.expansionRow.hidden;
+        pair.expansionRow.hidden = isOpen;
+        button.setAttribute("aria-expanded", String(!isOpen));
+        return;
+      }
+      button.disabled = true;
+      try {
+        const expansionRow = createModelExpansionRow(recordId, await getModels(recordId));
+        if (rowPairs.get(recordId) !== pair) return;
+        pair.row.after(expansionRow);
+        pair.expansionRow = expansionRow;
+        expansionRow.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+      } catch (error) {
+        showToast(error.message || "Could not load models for this key.");
+      } finally {
+        button.disabled = false;
+      }
       return;
     }
     if (!button.dataset.copyId && !button.dataset.revealId) return;

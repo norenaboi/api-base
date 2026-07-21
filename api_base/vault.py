@@ -481,6 +481,15 @@ class Vault:
             raise KeyNotFoundError(f"API-key record {record_id} was not found.")
         return self._record_from_row(row)
 
+    def get_models(self, record_id: int) -> list[str]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT models_json FROM api_keys WHERE id = ?", (record_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyNotFoundError(f"API-key record {record_id} was not found.")
+        return json.loads(row["models_json"])
+
     def list_models(self) -> list[str]:
         with self._connect() as connection:
             rows = connection.execute(
