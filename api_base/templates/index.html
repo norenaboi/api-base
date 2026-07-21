@@ -1,3 +1,31 @@
+{% macro pagination_nav(label) %}
+  {% if total_pages > 1 %}
+    <nav class="pagination" aria-label="{{ label }}">
+      {% if page > 1 %}
+        <a class="button button-secondary" href="{{ url_for('index', page=page - 1, **pagination_query) }}">← Previous</a>
+      {% else %}
+        <span class="button button-secondary pagination-disabled" aria-disabled="true">← Previous</span>
+      {% endif %}
+      <span class="pagination-pages">
+        {% for item in pagination_items %}
+          {% if item is none %}
+            <span class="pagination-ellipsis" aria-hidden="true">…</span>
+          {% elif item == page %}
+            <span class="button pagination-page pagination-current" aria-current="page">{{ item }}</span>
+          {% else %}
+            <a class="button button-secondary pagination-page" href="{{ url_for('index', page=item, **pagination_query) }}">{{ item }}</a>
+          {% endif %}
+        {% endfor %}
+      </span>
+      <span class="visually-hidden">Page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong></span>
+      {% if page < total_pages %}
+        <a class="button button-secondary" href="{{ url_for('index', page=page + 1, **pagination_query) }}">Next →</a>
+      {% else %}
+        <span class="button button-secondary pagination-disabled" aria-disabled="true">Next →</span>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -108,6 +136,12 @@
               <button type="submit" class="button button-secondary">▣ Encrypted backup</button>
             </form>
             <button type="button" class="button button-secondary" data-copy-bulk>⧉ Copy keys in view</button>
+            <button
+              type="button"
+              class="button button-secondary"
+              data-copy-provider="{{ selected_provider }}"
+              {% if not selected_provider %}disabled{% endif %}
+            >⧉ Copy all {{ selected_provider|title if selected_provider else 'provider' }} keys</button>
           </div>
           <div class="toolbar-meta">
             <div class="record-count">
@@ -127,23 +161,34 @@
               <h2 id="keys-title">Stored keys</h2>
               <p>Secrets stay masked until you explicitly copy or reveal one.</p>
             </div>
-            <div class="model-filter" data-model-filter>
-              <label for="model-search">Filter by model</label>
-              <input
-                id="model-search"
-                type="search"
-                list="model-list"
-                placeholder="Search models…"
-                autocomplete="off"
-                value="{{ selected_model }}"
-              >
-              <datalist id="model-list">
-                {% for model in all_models %}<option value="{{ model }}"></option>{% endfor %}
-              </datalist>
-              <button type="button" class="clear-filter" data-clear-model hidden>Clear</button>
+            <div class="table-filters">
+              <div class="model-filter" data-model-filter>
+                <label for="model-search">Filter by model</label>
+                <input
+                  id="model-search"
+                  type="search"
+                  list="model-list"
+                  placeholder="Search models…"
+                  autocomplete="off"
+                  value="{{ selected_model }}"
+                >
+                <datalist id="model-list">
+                  {% for model in all_models %}<option value="{{ model }}"></option>{% endfor %}
+                </datalist>
+                <button type="button" class="clear-filter" data-clear-model hidden>Clear</button>
+              </div>
+              <label class="tier-filter">
+                <span>OpenRouter tier</span>
+                <select data-filter-key="tier" {% if selected_provider != 'openrouter' %}disabled{% endif %}>
+                  <option value="">All tiers</option>
+                  <option value="free" {% if selected_tier == 'free' %}selected{% endif %}>Free</option>
+                  <option value="paid" {% if selected_tier == 'paid' %}selected{% endif %}>Paid</option>
+                </select>
+              </label>
             </div>
           </div>
 
+          {{ pagination_nav('Key pages above table') }}
           <div class="table-wrap">
             <table data-key-table>
               <colgroup>
@@ -219,21 +264,7 @@
               </tbody>
             </table>
           </div>
-          {% if total_pages > 1 %}
-            <nav class="pagination" aria-label="Key pages">
-              {% if page > 1 %}
-                <a class="button button-secondary" href="{{ url_for('index', page=page - 1, sort=sort_by, direction=direction, model=selected_model, provider=selected_provider, status=selected_status, trashed='1' if include_trashed else '') }}">← Previous</a>
-              {% else %}
-                <span class="button button-secondary pagination-disabled" aria-disabled="true">← Previous</span>
-              {% endif %}
-              <span>Page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong></span>
-              {% if page < total_pages %}
-                <a class="button button-secondary" href="{{ url_for('index', page=page + 1, sort=sort_by, direction=direction, model=selected_model, provider=selected_provider, status=selected_status, trashed='1' if include_trashed else '') }}">Next →</a>
-              {% else %}
-                <span class="button button-secondary pagination-disabled" aria-disabled="true">Next →</span>
-              {% endif %}
-            </nav>
-          {% endif %}
+          {{ pagination_nav('Key pages below table') }}
         </section>
       </main>
     </div>

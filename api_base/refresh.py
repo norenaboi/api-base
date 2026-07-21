@@ -19,20 +19,27 @@ def _fetch_result(
     models = model_result.models if model_result.status_code == 200 else []
     health = check_key_health(provider, api_key, model=check_model, transport=transport)
     return ProviderResult(
-        health.status_code,
-        models,
-        health.error or model_result.error,
-        health.comment,
+        status_code=health.status_code,
+        models=models,
+        error=health.error or model_result.error,
+        comment=health.comment,
+        openrouter_tier=health.openrouter_tier,
     )
 
 
 def _persist_result(vault: Vault, record_id: int, result: ProviderResult) -> None:
+    tier_update = (
+        {"openrouter_tier": result.openrouter_tier}
+        if result.openrouter_tier in {"free", "paid"}
+        else {}
+    )
     vault.update_check_result(
         record_id,
         result.status_code,
         result.models,
         error_message=result.error,
         user_comment=result.comment,
+        **tier_update,
     )
 
 
@@ -90,7 +97,7 @@ def refresh_all(
             try:
                 result = future.result()
             except Exception as error:  # provider failures should not abort the remaining batch
-                result = ProviderResult(None, [], str(error))
+                result = ProviderResult(status_code=None, models=[], error=str(error))
             results[record_id] = result
 
     for record_id, result in results.items():

@@ -13,6 +13,7 @@ class ProviderResult:
     models: list[str]
     error: str | None = None
     comment: str | None = None
+    openrouter_tier: str | None = None
 
 
 class QuotaExceededError(Exception):
@@ -252,7 +253,14 @@ def _check_openrouter_key(
     if not isinstance(data, dict):
         data = {}
 
-    tier = "free" if data.get("is_free_tier") else "paid"
+    is_free_tier = data.get("is_free_tier")
+    tier = (
+        "free"
+        if is_free_tier is True
+        else "paid"
+        if is_free_tier is False
+        else None
+    )
 
     limit = data.get("limit")
     if limit is None:
@@ -265,9 +273,48 @@ def _check_openrouter_key(
             limit_part += f"/{period}"
 
     total_spent = _format_amount(data.get("usage"))
+    tier_label = f"{tier} tier" if tier else "unknown tier"
+    comment = f"{tier_label} - {limit_part} - {total_spent}$"
 
-    comment = f"{tier} tier - {limit_part} - {total_spent}$"
-    return ProviderResult(200, [], None, comment)
+    try:
+        with httpx.Client(
+            transport=transport,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": "mistralai/ministral-3b-2512",
+                    "messages": [{"role": "user", "content": "hey"}],
+                    "max_tokens": 1,
+                },
+            )
+    except httpx.HTTPError:
+        return ProviderResult(
+            status_code=None,
+            models=[],
+            error="Could not reach the provider endpoint.",
+            comment=comment,
+            openrouter_tier=tier,
+        )
+
+    if response.status_code != 200:
+        failure = _failure_result("openrouter", response)
+        return ProviderResult(
+            status_code=failure.status_code,
+            models=[],
+            error=failure.error,
+            comment=comment,
+            openrouter_tier=tier,
+        )
+    return ProviderResult(
+        status_code=200,
+        models=[],
+        comment=comment,
+        openrouter_tier=tier,
+    )
 
 
 def check_key_health(

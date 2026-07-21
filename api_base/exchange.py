@@ -73,6 +73,12 @@ def normalize_record(raw_record: object) -> dict[str, Any]:
             raise ValueError("check_model must be a string or null")
         check_model = check_model.strip() or None
 
+    openrouter_tier = raw_record.get("openrouter_tier")
+    if openrouter_tier not in {None, "free", "paid"}:
+        raise ValueError("openrouter_tier must be free, paid, or null")
+    if key_type.lower() != "openrouter":
+        openrouter_tier = None
+
     return {
         "name": name.strip(),
         "key_type": key_type.lower(),
@@ -81,6 +87,7 @@ def normalize_record(raw_record: object) -> dict[str, Any]:
         "models": _normalize_models(raw_record.get("models", [])),
         "user_comment": user_comment,
         "check_model": check_model,
+        "openrouter_tier": openrouter_tier,
     }
 
 
@@ -127,6 +134,7 @@ def export_json_data(vault: Vault, keys: VaultKeyMaterial) -> dict[str, list[dic
                 "models": record["models"],
                 "user_comment": record["user_comment"],
                 "check_model": record.get("check_model"),
+                "openrouter_tier": record.get("openrouter_tier"),
             }
         )
     return {"data": exported_records}

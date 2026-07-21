@@ -24,6 +24,7 @@ from flask import (
 )
 
 from api_base.exchange import (
+    SUPPORTED_KEY_TYPES,
     DataFormatError,
     export_json_data,
     import_json_data,
@@ -31,6 +32,32 @@ from api_base.exchange import (
 )
 from api_base.refresh import refresh_all, refresh_key
 from api_base.vault import DuplicateKeyError, Vault, VaultError, VaultKeyMaterial
+
+
+def _normalize_provider(value: str | None, *, required: bool = False) -> str | None:
+    provider = (value or "").strip().lower()
+    if not provider and not required:
+        return None
+    if provider not in SUPPORTED_KEY_TYPES:
+        raise ValueError("Select a supported provider.")
+    return provider
+
+
+def _pagination_items(page: int, total_pages: int) -> list[int | None]:
+    pages = set(range(1, min(total_pages, 4) + 1))
+    pages.update(range(max(1, page - 1), min(total_pages, page + 1) + 1))
+    pages.update(range(max(1, total_pages - 2), total_pages + 1))
+    ordered = sorted(pages)
+    items: list[int | None] = []
+    for current in ordered:
+        if items and isinstance(items[-1], int):
+            gap = current - items[-1]
+            if gap == 2:
+                items.append(current - 1)
+            elif gap > 2:
+                items.append(None)
+        items.append(current)
+    return items
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
@@ -136,18 +163,26 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         sort_by = sort_aliases.get(requested_sort, requested_sort)
         direction = request.args.get("direction", "asc").lower()
         model = request.args.get("model", "").strip()
-        provider = request.args.get("provider", "").strip().lower()
+        raw_provider = request.args.get("provider", "")
+        provider = (raw_provider or "").strip().lower()
         status = request.args.get("status", "").strip().lower()
+        tier = request.args.get("tier", "").strip().lower()
         include_trashed = request.args.get("trashed", "") == "1"
         try:
             page = max(1, int(request.args.get("page", "1")))
         except ValueError:
             page = 1
 
+        try:
+            normalized_provider = _normalize_provider(raw_provider)
+        except ValueError:
+            normalized_provider = None
+            provider = ""
         query_options = {
             "model": model or None,
-            "key_type": provider or None,
+            "key_type": normalized_provider,
             "status": status or None,
+            "openrouter_tier": tier or None,
             "include_trashed": include_trashed,
         }
 
@@ -171,11 +206,21 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             direction = "asc"
             provider = ""
             status = ""
-            query_options.update(key_type=None, status=None)
+            tier = ""
+            query_options.update(key_type=None, status=None, openrouter_tier=None)
             records, total_records, total_pages, page = load_page()
 
         page_start = (page - 1) * page_size + 1 if total_records else 0
         page_end = min(page * page_size, total_records)
+        pagination_query = {
+            "sort": sort_by,
+            "direction": direction,
+            "model": model,
+            "provider": provider,
+            "status": status,
+            "tier": tier,
+            "trashed": "1" if include_trashed else "",
+        }
         return render_template(
             "index.html",
             state="unlocked",
@@ -184,6 +229,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             selected_model=model,
             selected_provider=provider,
             selected_status=status,
+            selected_tier=tier,
             sort_by=sort_by,
             direction=direction,
             include_trashed=include_trashed,
@@ -192,6 +238,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             total_records=total_records,
             page_start=page_start,
             page_end=page_end,
+            pagination_items=_pagination_items(page, total_pages),
+            pagination_query=pagination_query,
         )
 
     @app.post("/setup")
@@ -296,6 +344,20 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         except VaultError as error:
             return jsonify({"error": str(error)}), 404
         return jsonify({"key": api_key})
+
+    @app.post("/keys/copy-provider")
+    @require_unlocked
+    def copy_provider_keys() -> Any:
+        try:
+            provider = _normalize_provider(request.form.get("provider"), required=True)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        records = vault().list_keys(key_type=provider)
+        keys = [
+            vault().reveal_key(unlocked_keys(), int(record["id"]))  # type: ignore[arg-type]
+            for record in records
+        ]
+        return jsonify({"keys": keys, "count": len(keys)})
 
     @app.post("/keys/<int:record_id>/delete")
     @require_unlocked

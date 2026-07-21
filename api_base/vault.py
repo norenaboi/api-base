@@ -18,6 +18,7 @@ KEY_AAD = b"api-base:key:v1"
 SALT_BYTES = 16
 NONCE_BYTES = 12
 MINIMUM_PASSWORD_LENGTH = 10
+OPENROUTER_TIER_UNCHANGED = object()
 
 
 class VaultError(Exception):
@@ -88,6 +89,8 @@ class Vault:
                 connection.execute(
                     "ALTER TABLE api_keys ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0"
                 )
+            if "openrouter_tier" not in columns:
+                connection.execute("ALTER TABLE api_keys ADD COLUMN openrouter_tier TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
@@ -161,6 +164,7 @@ class Vault:
                     models_json TEXT NOT NULL DEFAULT '[]',
                     user_comment TEXT NOT NULL DEFAULT '',
                     check_model TEXT,
+                    openrouter_tier TEXT,
                     last_checked_at TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +239,7 @@ class Vault:
         models: list[str] | None = None,
         user_comment: str = "",
         check_model: str | None = None,
+        openrouter_tier: str | None = None,
     ) -> int:
         normalized_key = api_key.strip()
         nonce = os.urandom(NONCE_BYTES)
@@ -250,9 +255,9 @@ class Vault:
                 INSERT INTO api_keys (
                     name, key_type, key_ciphertext, key_nonce, key_fingerprint,
                     key_first_four, key_last_four, status_code, models_json, user_comment,
-                    check_model
+                    check_model, openrouter_tier
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name,
@@ -266,6 +271,7 @@ class Vault:
                     serialized_models,
                     user_comment,
                     check_model,
+                    openrouter_tier if key_type == "openrouter" else None,
                 ),
             )
         except sqlite3.IntegrityError as error:
@@ -285,6 +291,7 @@ class Vault:
         models: list[str] | None = None,
         user_comment: str = "",
         check_model: str | None = None,
+        openrouter_tier: str | None = None,
     ) -> int:
         with self._connect() as connection:
             return self._insert_key(
@@ -298,6 +305,7 @@ class Vault:
                 models=models,
                 user_comment=user_comment,
                 check_model=check_model,
+                openrouter_tier=openrouter_tier,
             )
 
     def create_keys(
@@ -334,6 +342,8 @@ class Vault:
             "models_json = ?",
             "user_comment = ?",
         ]
+        if key_type != "openrouter":
+            assignments.append("openrouter_tier = NULL")
         parameters: list[object] = [
             name,
             key_type,
@@ -394,6 +404,7 @@ class Vault:
         models: list[str],
         error_message: str | None = None,
         user_comment: str | None = None,  # None means "leave the existing comment"
+        openrouter_tier: str | None | object = OPENROUTER_TIER_UNCHANGED,
     ) -> None:
         assignments = [
             "status_code = ?",
@@ -410,6 +421,11 @@ class Vault:
         if user_comment is not None:
             assignments.insert(3, "user_comment = ?")
             parameters.append(user_comment)
+        if openrouter_tier is not OPENROUTER_TIER_UNCHANGED:
+            if openrouter_tier not in {"free", "paid", None}:
+                raise ValueError(f"Unsupported OpenRouter tier: {openrouter_tier}")
+            assignments.append("openrouter_tier = ?")
+            parameters.append(openrouter_tier)
         parameters.append(record_id)
         query = f"UPDATE api_keys SET {', '.join(assignments)} WHERE id = ?"  # noqa: S608
         with self._connect() as connection:
@@ -440,6 +456,7 @@ class Vault:
             "status_code": row["status_code"],
             "error_message": row["error_message"],
             "check_model": row["check_model"],
+            "openrouter_tier": row["openrouter_tier"],
             "models": json.loads(row["models_json"]),
             "user_comment": row["user_comment"],
             "last_checked_at": row["last_checked_at"],
@@ -453,8 +470,8 @@ class Vault:
             row = connection.execute(
                 """
                 SELECT id, name, key_type, key_first_four, key_last_four, status_code,
-                       models_json, user_comment, error_message, check_model, last_checked_at,
-                       created_at, updated_at, trashed
+                       models_json, user_comment, error_message, check_model, openrouter_tier,
+                       last_checked_at, created_at, updated_at, trashed
                 FROM api_keys
                 WHERE id = ?
                 """,
@@ -482,6 +499,7 @@ class Vault:
         key_type: str | None,
         status: str | None,
         status_code: int | None,
+        openrouter_tier: str | None,
         include_trashed: bool,
     ) -> tuple[str, list[object]]:
         conditions: list[str] = []
@@ -513,6 +531,13 @@ class Vault:
             if status not in status_conditions:
                 raise ValueError(f"Unsupported status filter: {status}")
             conditions.append(status_conditions[status])
+        if openrouter_tier:
+            if openrouter_tier not in {"free", "paid"}:
+                raise ValueError(f"Unsupported OpenRouter tier filter: {openrouter_tier}")
+            conditions.extend(
+                ["api_keys.key_type = 'openrouter'", "api_keys.openrouter_tier = ?"]
+            )
+            parameters.append(openrouter_tier)
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         return where_clause, parameters
 
@@ -523,6 +548,7 @@ class Vault:
         key_type: str | None = None,
         status: str | None = None,
         status_code: int | None = None,
+        openrouter_tier: str | None = None,
         include_trashed: bool = False,
     ) -> int:
         where_clause, parameters = self._key_filters(
@@ -530,6 +556,7 @@ class Vault:
             key_type=key_type,
             status=status,
             status_code=status_code,
+            openrouter_tier=openrouter_tier,
             include_trashed=include_trashed,
         )
         with self._connect() as connection:
@@ -548,6 +575,7 @@ class Vault:
         key_type: str | None = None,
         status: str | None = None,
         status_code: int | None = None,
+        openrouter_tier: str | None = None,
         include_trashed: bool = False,
         limit: int | None = None,
         offset: int = 0,
@@ -574,6 +602,7 @@ class Vault:
             key_type=key_type,
             status=status,
             status_code=status_code,
+            openrouter_tier=openrouter_tier,
             include_trashed=include_trashed,
         )
         sort_column = sort_columns[sort_by]
@@ -587,8 +616,8 @@ class Vault:
         query = (
             f"""
             SELECT id, name, key_type, key_first_four, key_last_four, status_code, models_json,
-                   user_comment, error_message, check_model, last_checked_at, created_at,
-                   updated_at, trashed
+                   user_comment, error_message, check_model, openrouter_tier, last_checked_at,
+                   created_at, updated_at, trashed
             FROM api_keys
             {where_clause}
             ORDER BY {nulls_last}{sort_column} {normalized_direction.upper()}, api_keys.id ASC

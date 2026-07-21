@@ -74,7 +74,12 @@
   }
   clearModelButton?.addEventListener("click", () => navigateWithParam("model", ""));
   headerFilters.forEach((select) => {
-    select.addEventListener("change", () => navigateWithParam(select.dataset.filterKey, select.value));
+    select.addEventListener("change", () => {
+      if (select.dataset.filterKey === "provider" && select.value !== "openrouter") {
+        url.searchParams.delete("tier");
+      }
+      navigateWithParam(select.dataset.filterKey, select.value);
+    });
   });
 
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
@@ -317,6 +322,27 @@
       showToast(`Copied ${secrets.length} ${secrets.length === 1 ? "key" : "keys"} to clipboard.`);
     } catch (error) {
       showToast(error.message || "Bulk copy failed.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector("[data-copy-provider]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const provider = button.dataset.copyProvider;
+    if (!provider) return showToast("Select a provider first.");
+    button.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append("csrf_token", csrfToken);
+      formData.append("provider", provider);
+      const payload = await submitFormAjax("/keys/copy-provider", formData);
+      if (!Array.isArray(payload.keys)) throw new Error("The server returned invalid key data.");
+      if (!payload.keys.length) return showToast(`No active ${provider} keys to copy.`);
+      await navigator.clipboard.writeText(payload.keys.join("\n"));
+      showToast(`Copied ${payload.count} ${provider} ${payload.count === 1 ? "key" : "keys"}.`);
+    } catch (error) {
+      showToast(error.message || "Provider copy failed.");
     } finally {
       button.disabled = false;
     }
