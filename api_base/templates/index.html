@@ -224,6 +224,7 @@
                       <option value="openrouter" {% if selected_provider == 'openrouter' %}selected{% endif %}>OpenRouter</option>
                       <option value="zhipu" {% if selected_provider == 'zhipu' %}selected{% endif %}>Zhipu</option>
                       <option value="moonshot" {% if selected_provider == 'moonshot' %}selected{% endif %}>Moonshot</option>
+                      <option value="dashscope" {% if selected_provider == 'dashscope' %}selected{% endif %}>DashScope</option>
                     </select>
                   </div>
                 </th>
@@ -278,7 +279,7 @@
         </div>
         <div class="form-grid">
           <label><span>Name</span><input name="name" maxlength="200" required autofocus placeholder="Personal, Work, Backup…"></label>
-          <label><span>Provider</span><select name="typeofkey" required><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option></select></label>
+          <label><span>Provider</span><select name="typeofkey" required><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option><option value="dashscope">DashScope</option></select></label>
           <label class="full-field"><span>API key</span><input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="Paste the secret value"></label>
           <label><span>Status code <small>optional</small></span><input type="number" name="status_code" min="100" max="599" placeholder="200"></label>
           <label><span>Models <small>comma separated</small></span><input name="models" placeholder="model-one, model-two"></label>
@@ -297,7 +298,7 @@
         </div>
         <div class="form-grid">
           <label><span>Name</span><input name="name" maxlength="200" required data-edit-field="name"></label>
-          <label><span>Provider</span><select name="typeofkey" required data-edit-field="provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option></select></label>
+          <label><span>Provider</span><select name="typeofkey" required data-edit-field="provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="xai">xAI</option><option value="huggingface">Hugging Face</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="zhipu">Zhipu</option><option value="moonshot">Moonshot</option><option value="dashscope">DashScope</option></select></label>
           <label class="full-field"><span>Replace API key <small>leave blank to keep it</small></span><input type="password" name="key" autocomplete="off" spellcheck="false"></label>
           <label><span>Status code <small>optional</small></span><input type="number" name="status_code" min="100" max="599" data-edit-field="status"></label>
           <label><span>Models <small>comma separated</small></span><input name="models" data-edit-field="models"></label>

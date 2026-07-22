@@ -123,6 +123,15 @@ def _minimal_chat_payload(provider: str, model: str | None = None) -> tuple[str,
                 "max_tokens": 1,
             },
         )
+    if provider == "dashscope":
+        return (
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            {
+                "model": model or "qwen-turbo",
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+        )
     if provider == "gemini":
         model_name = model or "gemini-2.5-flash"
         url = (
@@ -378,6 +387,7 @@ def fetch_models(
         "openrouter": "https://openrouter.ai/api/v1/models",
         "zhipu": "https://open.bigmodel.cn/api/paas/v4/models",
         "moonshot": "https://api.moonshot.cn/v1/models",
+        "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
     }
     if provider not in endpoints:
         raise ValueError(f"Unsupported provider: {provider}")

@@ -16,6 +16,7 @@ SUPPORTED_KEY_TYPES = frozenset(
         "openrouter",
         "zhipu",
         "moonshot",
+        "dashscope",
     }
 )
 
@@ -48,7 +49,7 @@ def normalize_record(raw_record: object) -> dict[str, Any]:
     if not isinstance(key_type, str) or key_type.lower() not in SUPPORTED_KEY_TYPES:
         raise ValueError(
             "typeofkey must be deepseek, openai, anthropic, gemini, xai, huggingface, "
-            "groq, openrouter, zhipu, or moonshot"
+            "groq, openrouter, zhipu, moonshot, or dashscope"
         )
 
     api_key = raw_record.get("key")

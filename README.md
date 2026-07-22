@@ -4,7 +4,7 @@ A small localhost-only web app for maintaining an encrypted inventory of API key
 
 ## Features
 
-- Providers: DeepSeek, OpenAI, Anthropic, Gemini, and xAI
+- Providers: DeepSeek, OpenAI, Anthropic, Gemini, xAI, Hugging Face, Groq, OpenRouter, Zhipu, Moonshot, and DashScope
 - Duplicate display names are allowed
 - Duplicate API-key values are rejected and skipped during import
 - API keys are encrypted at rest in SQLite with a master-password-derived key
@@ -134,7 +134,7 @@ A bare list containing the same record objects is also accepted.
 Rules:
 
 - `name` may be repeated.
-- `typeofkey` must be `deepseek`, `openai`, `anthropic`, `gemini`, or `xai`.
+- `typeofkey` must be `deepseek`, `openai`, `anthropic`, `gemini`, `xai`, `huggingface`, `groq`, `openrouter`, `zhipu`, `moonshot`, or `dashscope`.
 - `key` is required and is the deduplication identity.
 - `status_code` may be an integer or `null`.
 - `models` may be a JSON list or a comma-separated string.
