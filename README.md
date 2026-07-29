@@ -4,7 +4,7 @@ A small localhost-only web app for maintaining an encrypted inventory of API key
 
 ## Features
 
-- Providers: DeepSeek, OpenAI, Anthropic, Gemini, xAI, Hugging Face, Groq, OpenRouter, Zhipu, Moonshot, and DashScope
+- Providers: DeepSeek, OpenAI, Anthropic, Gemini, xAI, Hugging Face, Groq, OpenRouter, Zhipu, Moonshot, DashScope, and Replicate
 - Duplicate display names are allowed
 - Duplicate API-key values are rejected and skipped during import
 - API keys are encrypted at rest in SQLite with a master-password-derived key
@@ -134,7 +134,7 @@ A bare list containing the same record objects is also accepted.
 Rules:
 
 - `name` may be repeated.
-- `typeofkey` must be `deepseek`, `openai`, `anthropic`, `gemini`, `xai`, `huggingface`, `groq`, `openrouter`, `zhipu`, `moonshot`, or `dashscope`.
+- `typeofkey` must be `deepseek`, `openai`, `anthropic`, `gemini`, `xai`, `huggingface`, `groq`, `openrouter`, `zhipu`, `moonshot`, `dashscope`, or `replicate`.
 - `key` is required and is the deduplication identity.
 - `status_code` may be an integer or `null`.
 - `models` may be a JSON list or a comma-separated string.
@@ -160,7 +160,7 @@ cp /path/to/api-base-vault.sqlite3 /path/to/api-base/data/vault.sqlite3
 
 ## Provider refresh behavior
 
-Refresh fetches the provider's model list, then performs a minimal inference health check. OpenAI checks use `POST /v1/responses` with a low-cost default model unless a check model is selected. The app stores:
+Refresh fetches the provider's model list, then performs a minimal inference health check. OpenAI checks use `POST /v1/responses` with a low-cost default model unless a check model is selected. Replicate model discovery follows at most 10 pages or 1,000 models from `/v1/models` and stores identifiers as `owner/name`. Its health check creates the streamed `anthropic/claude-3.7-sonnet` prediction shown in `~/Downloads/replicate_api.txt`, then consumes the returned SSE stream. This request may use Replicate credits. The app stores:
 
 - the health-check HTTP status (`200`, `401`, `403`, `429`, and so on)
 - model identifiers returned by the independent model-list request

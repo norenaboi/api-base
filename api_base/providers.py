@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
+REPLICATE_MODELS_URL = "https://api.replicate.com/v1/models"
+REPLICATE_PREDICTIONS_URL = (
+    "https://api.replicate.com/v1/models/anthropic/claude-3.7-sonnet/predictions"
+)
+REPLICATE_MAX_MODEL_PAGES = 10
+REPLICATE_MAX_MODELS = 1000
+REPLICATE_REFRESH_PROMPT = (
+    "Give me a recipe for pancakes that could feed all of California."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +250,78 @@ def _check_deepseek_balance(
 _OPENROUTER_RESET_PERIODS = {"daily": "day", "weekly": "week", "monthly": "month"}
 
 
+def _is_safe_replicate_stream_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    hostname = parsed.hostname or ""
+    return (
+        parsed.scheme == "https"
+        and port in {None, 443}
+        and parsed.username is None
+        and parsed.password is None
+        and (hostname == "replicate.com" or hostname.endswith(".replicate.com"))
+    )
+
+
+def _check_replicate_prediction(
+    api_key: str,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ProviderResult:
+    headers = _auth_headers("replicate", api_key)
+    try:
+        with httpx.Client(
+            transport=transport,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            prediction_response = client.post(
+                REPLICATE_PREDICTIONS_URL,
+                headers=headers,
+                json={
+                    "stream": True,
+                    "input": {"prompt": REPLICATE_REFRESH_PROMPT},
+                },
+            )
+            if not 200 <= prediction_response.status_code < 300:
+                return _failure_result("replicate", prediction_response)
+
+            try:
+                payload = prediction_response.json()
+            except ValueError:
+                return ProviderResult(
+                    prediction_response.status_code,
+                    [],
+                    "Provider returned an unreadable prediction response.",
+                )
+            urls = payload.get("urls") if isinstance(payload, dict) else None
+            stream_url = urls.get("stream") if isinstance(urls, dict) else None
+            if not isinstance(stream_url, str) or not _is_safe_replicate_stream_url(stream_url):
+                return ProviderResult(
+                    prediction_response.status_code,
+                    [],
+                    "Provider returned an invalid prediction stream URL.",
+                )
+
+            stream_response = client.get(
+                stream_url,
+                headers={
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-store",
+                    "User-Agent": "api-base/0.1",
+                },
+            )
+    except httpx.HTTPError:
+        return ProviderResult(None, [], "Could not reach the provider endpoint.")
+
+    if not 200 <= stream_response.status_code < 300:
+        return _failure_result("replicate", stream_response)
+    return ProviderResult(stream_response.status_code, [])
+
+
 def _check_openrouter_key(
     api_key: str,
     *,
@@ -343,6 +425,8 @@ def check_key_health(
         return _check_deepseek_balance(api_key, transport=transport)
     if provider == "openrouter":
         return _check_openrouter_key(api_key, transport=transport)
+    if provider == "replicate":
+        return _check_replicate_prediction(api_key, transport=transport)
 
     try:
         url, payload = _minimal_chat_payload(provider, model)
@@ -370,12 +454,124 @@ def check_key_health(
     return _failure_result(provider, response)
 
 
+def _is_safe_replicate_models_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "api.replicate.com"
+        and port in {None, 443}
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == "/v1/models"
+    )
+
+
+def _fetch_replicate_models(
+    api_key: str,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> ProviderResult:
+    headers = _auth_headers("replicate", api_key)
+    models: set[str] = set()
+    visited_urls: set[str] = set()
+    url: str | None = REPLICATE_MODELS_URL
+
+    try:
+        with httpx.Client(
+            transport=transport,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            for page_number in range(REPLICATE_MAX_MODEL_PAGES):
+                if url is None:
+                    return ProviderResult(200, sorted(models))
+                if url in visited_urls:
+                    return ProviderResult(
+                        200, sorted(models), "Provider returned a pagination loop."
+                    )
+                if not _is_safe_replicate_models_url(url):
+                    return ProviderResult(
+                        200,
+                        sorted(models),
+                        "Provider returned an unsafe models pagination URL.",
+                    )
+
+                visited_urls.add(url)
+                response = client.get(url, headers=headers)
+                if response.status_code != 200:
+                    return ProviderResult(
+                        response.status_code,
+                        [],
+                        f"Provider returned HTTP {response.status_code}.",
+                    )
+
+                try:
+                    payload = response.json()
+                except ValueError:
+                    return ProviderResult(
+                        200, [], "Provider returned an unreadable models response."
+                    )
+                if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+                    return ProviderResult(
+                        200, [], "Provider returned an unreadable models response."
+                    )
+
+                for item_index, item in enumerate(payload["results"]):
+                    if not isinstance(item, dict):
+                        continue
+                    owner = item.get("owner")
+                    name = item.get("name")
+                    if not isinstance(owner, str) or not isinstance(name, str):
+                        continue
+                    owner = owner.strip()
+                    name = name.strip()
+                    if owner and name:
+                        models.add(f"{owner}/{name}")
+                    if len(models) >= REPLICATE_MAX_MODELS:
+                        has_unread_items = item_index < len(payload["results"]) - 1
+                        error = (
+                            f"Model list was truncated after {REPLICATE_MAX_MODELS} models."
+                            if has_unread_items or payload.get("next") is not None
+                            else None
+                        )
+                        return ProviderResult(200, sorted(models)[:REPLICATE_MAX_MODELS], error)
+
+                next_url = payload.get("next")
+                if next_url is None:
+                    return ProviderResult(200, sorted(models))
+                if not isinstance(next_url, str):
+                    return ProviderResult(
+                        200,
+                        sorted(models),
+                        "Provider returned an invalid models pagination URL.",
+                    )
+                url = next_url
+
+                if page_number == REPLICATE_MAX_MODEL_PAGES - 1:
+                    return ProviderResult(
+                        200,
+                        sorted(models),
+                        f"Model list was truncated after {REPLICATE_MAX_MODEL_PAGES} pages.",
+                    )
+    except httpx.HTTPError:
+        return ProviderResult(None, [], "Could not reach the provider models endpoint.")
+
+    return ProviderResult(200, sorted(models))
+
+
 def fetch_models(
     provider: str,
     api_key: str,
     *,
     transport: httpx.BaseTransport | None = None,
 ) -> ProviderResult:
+    if provider == "replicate":
+        return _fetch_replicate_models(api_key, transport=transport)
+
     endpoints = {
         "openai": "https://api.openai.com/v1/models",
         "deepseek": "https://api.deepseek.com/models",
