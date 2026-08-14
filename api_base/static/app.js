@@ -8,6 +8,7 @@
   const clearModelButton = document.querySelector("[data-clear-model]");
   const headerFilters = document.querySelectorAll("[data-filter-key]");
   const trashToggle = document.querySelector("[data-trash-toggle]");
+  const statusCodeFilter = document.querySelector("[data-status-code-filter]");
   const url = new URL(window.location.href);
   const rowPairs = new Map();
   let filterTimeoutId;
@@ -73,6 +74,14 @@
     });
   }
   clearModelButton?.addEventListener("click", () => navigateWithParam("model", ""));
+  statusCodeFilter?.addEventListener("change", () => {
+    const value = statusCodeFilter.value.trim();
+    if (value && (Number(value) < 100 || Number(value) > 599)) {
+      showToast("HTTP status code must be from 100 through 599.");
+      return;
+    }
+    navigateWithParam("status_code", value);
+  });
   headerFilters.forEach((select) => {
     select.addEventListener("change", () => {
       if (select.dataset.filterKey === "provider" && select.value !== "openrouter") {
@@ -293,6 +302,21 @@
     if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;
     const submitButton = form.querySelector('[type="submit"]');
     if (submitButton) submitButton.disabled = true;
+    ["model", "provider", "status", "status_code", "tier", "sort", "direction"].forEach((name) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = url.searchParams.get(name) || "";
+      form.append(input);
+    });
+    let trashedInput = form.querySelector('input[name="trashed"]');
+    if (!trashedInput) {
+      trashedInput = document.createElement("input");
+      trashedInput.type = "hidden";
+      trashedInput.name = "trashed";
+      form.append(trashedInput);
+    }
+    trashedInput.value = trashToggle?.checked ? "1" : "0";
     if (form.dataset.rowAction === "trash") {
       let includeInput = form.querySelector('input[name="include_trashed"]');
       if (!includeInput) {
@@ -301,7 +325,7 @@
         includeInput.name = "include_trashed";
         form.append(includeInput);
       }
-      includeInput.value = trashToggle?.checked ? "1" : "0";
+      includeInput.value = trashedInput.value;
     }
     try {
       const updateInPlace = ["refresh", "trash"].includes(form.dataset.rowAction);
@@ -343,10 +367,9 @@
     }
   });
 
-  document.querySelectorAll("form[data-confirm][data-async-skip]").forEach((form) => {
-    form.addEventListener("submit", (event) => {
-      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
-    });
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("form[data-confirm][data-async-skip]");
+    if (form && !window.confirm(form.dataset.confirm)) event.preventDefault();
   });
   document.querySelectorAll("[data-auto-submit]").forEach((control) => {
     control.addEventListener("change", () => control.form?.requestSubmit());

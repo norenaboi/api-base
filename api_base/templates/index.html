@@ -142,6 +142,45 @@
               data-copy-provider="{{ selected_provider }}"
               {% if not selected_provider %}disabled{% endif %}
             >⧉ Copy all {{ selected_provider|title if selected_provider else 'provider' }} keys</button>
+            {% if selected_status_code is not none %}
+              <form
+                action="{{ url_for('trash_matching_status') }}"
+                method="post"
+                data-confirm="Move every active key matching HTTP {{ selected_status_code }} and the current filters to trash across all pages?"
+                data-async-skip
+              >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="target_status_code" value="{{ selected_status_code }}">
+                <input type="hidden" name="model" value="{{ selected_model }}">
+                <input type="hidden" name="provider" value="{{ selected_provider }}">
+                <input type="hidden" name="status" value="{{ selected_status }}">
+                <input type="hidden" name="status_code" value="{{ selected_status_code }}">
+                <input type="hidden" name="tier" value="{{ selected_tier }}">
+                <input type="hidden" name="trashed" value="{{ '1' if include_trashed else '' }}">
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="direction" value="{{ direction }}">
+                <button type="submit" class="button button-secondary">⌫ Trash all HTTP {{ selected_status_code }} matches</button>
+              </form>
+            {% endif %}
+            {% if include_trashed %}
+              <form
+                action="{{ url_for('delete_matching_trashed') }}"
+                method="post"
+                data-confirm="Permanently delete every trashed key matching the current filters across all pages? This cannot be undone."
+                data-async-skip
+              >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="model" value="{{ selected_model }}">
+                <input type="hidden" name="provider" value="{{ selected_provider }}">
+                <input type="hidden" name="status" value="{{ selected_status }}">
+                <input type="hidden" name="status_code" value="{{ selected_status_code if selected_status_code is not none else '' }}">
+                <input type="hidden" name="tier" value="{{ selected_tier }}">
+                <input type="hidden" name="trashed" value="1">
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="direction" value="{{ direction }}">
+                <button type="submit" class="button button-danger">Permanently delete matching trash</button>
+              </form>
+            {% endif %}
           </div>
           <div class="toolbar-meta">
             <div class="record-count">
@@ -159,7 +198,7 @@
           <div class="table-card-header">
             <div>
               <h2 id="keys-title">Stored keys</h2>
-              <p>Secrets stay masked until you explicitly copy or reveal one.</p>
+              <p>Secrets stay masked until you explicitly copy one.</p>
             </div>
             <div class="table-filters">
               <div class="model-filter" data-model-filter>
@@ -177,6 +216,18 @@
                 </datalist>
                 <button type="button" class="clear-filter" data-clear-model hidden>Clear</button>
               </div>
+              <label class="status-code-filter">
+                <span>Exact HTTP code</span>
+                <input
+                  type="number"
+                  min="100"
+                  max="599"
+                  inputmode="numeric"
+                  placeholder="Any"
+                  value="{{ selected_status_code if selected_status_code is not none else '' }}"
+                  data-status-code-filter
+                >
+              </label>
               <label class="tier-filter">
                 <span>OpenRouter tier</span>
                 <select data-filter-key="tier" {% if selected_provider != 'openrouter' %}disabled{% endif %}>

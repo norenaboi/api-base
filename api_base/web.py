@@ -130,9 +130,26 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     def row_data(record_id: int) -> dict[str, Any]:
         record = vault().get_key(record_id)
+        try:
+            _, filters = key_filter_state(request.form)
+        except ValueError:
+            _, filters = key_filter_state({})
+        sort_by = request.form.get("sort", "id")
+        direction = request.form.get("direction", "asc")
         return {
             "record_id": record_id,
-            "html": render_template("_key_rows.html", record=record),
+            "html": render_template(
+                "_key_rows.html",
+                record=record,
+                selected_model=filters["model"],
+                selected_provider=filters["provider"],
+                selected_status=filters["status"],
+                selected_status_code=filters["status_code"],
+                selected_tier=filters["tier"],
+                include_trashed=filters["include_trashed"],
+                sort_by=sort_by,
+                direction=direction,
+            ),
         }
 
     def row_payload(record_id: int, *, message: str = "") -> Any:
@@ -145,6 +162,58 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             return jsonify({"error": str(error)}), status
         flash(str(error), "error")
         return redirect(url_for("index"))
+
+    def key_filter_state(values: Any) -> tuple[dict[str, object], dict[str, object]]:
+        model = values.get("model", "").strip()
+        raw_provider = values.get("provider", "")
+        provider = (raw_provider or "").strip().lower()
+        status = values.get("status", "").strip().lower()
+        tier = values.get("tier", "").strip().lower()
+        status_code = _optional_status(values.get("status_code"))
+        include_trashed = values.get("trashed", "") == "1"
+        normalized_provider = _normalize_provider(raw_provider)
+        if status and status not in {"ok", "rate", "error", "unchecked"}:
+            raise ValueError("Select a supported status filter.")
+        if tier and tier not in {"free", "paid"}:
+            raise ValueError("Select a supported OpenRouter tier.")
+        query_options = {
+            "model": model or None,
+            "key_type": normalized_provider,
+            "status": status or None,
+            "status_code": status_code,
+            "openrouter_tier": tier or None,
+            "include_trashed": include_trashed,
+        }
+        display = {
+            "model": model,
+            "provider": provider,
+            "status": status,
+            "status_code": status_code,
+            "tier": tier,
+            "include_trashed": include_trashed,
+        }
+        return query_options, display
+
+    def filtered_redirect(values: Any) -> Any:
+        sort_by = values.get("sort", "id")
+        if sort_by not in {"id", "name", "typeofkey", "status_code", "updated_at"}:
+            sort_by = "id"
+        direction = values.get("direction", "asc").lower()
+        if direction not in {"asc", "desc"}:
+            direction = "asc"
+        return redirect(
+            url_for(
+                "index",
+                sort=sort_by,
+                direction=direction,
+                model=values.get("model", ""),
+                provider=values.get("provider", ""),
+                status=values.get("status", ""),
+                status_code=values.get("status_code", ""),
+                tier=values.get("tier", ""),
+                trashed="1" if values.get("trashed", "") == "1" else "",
+            )
+        )
 
     @app.get("/healthz")
     def healthz() -> Any:
@@ -162,29 +231,21 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         requested_sort = request.args.get("sort", "id")
         sort_by = sort_aliases.get(requested_sort, requested_sort)
         direction = request.args.get("direction", "asc").lower()
-        model = request.args.get("model", "").strip()
-        raw_provider = request.args.get("provider", "")
-        provider = (raw_provider or "").strip().lower()
-        status = request.args.get("status", "").strip().lower()
-        tier = request.args.get("tier", "").strip().lower()
-        include_trashed = request.args.get("trashed", "") == "1"
         try:
             page = max(1, int(request.args.get("page", "1")))
         except ValueError:
             page = 1
 
         try:
-            normalized_provider = _normalize_provider(raw_provider)
+            query_options, filters = key_filter_state(request.args)
         except ValueError:
-            normalized_provider = None
-            provider = ""
-        query_options = {
-            "model": model or None,
-            "key_type": normalized_provider,
-            "status": status or None,
-            "openrouter_tier": tier or None,
-            "include_trashed": include_trashed,
-        }
+            query_options, filters = key_filter_state({})
+        model = str(filters["model"])
+        provider = str(filters["provider"])
+        status = str(filters["status"])
+        status_code = filters["status_code"]
+        tier = str(filters["tier"])
+        include_trashed = bool(filters["include_trashed"])
 
         def load_page() -> tuple[list[dict[str, object]], int, int, int]:
             total = vault().count_keys(**query_options)
@@ -206,8 +267,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             direction = "asc"
             provider = ""
             status = ""
+            status_code = None
             tier = ""
-            query_options.update(key_type=None, status=None, openrouter_tier=None)
+            query_options.update(
+                key_type=None, status=None, status_code=None, openrouter_tier=None
+            )
             records, total_records, total_pages, page = load_page()
 
         page_start = (page - 1) * page_size + 1 if total_records else 0
@@ -218,6 +282,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "model": model,
             "provider": provider,
             "status": status,
+            "status_code": status_code if status_code is not None else "",
             "tier": tier,
             "trashed": "1" if include_trashed else "",
         }
@@ -229,6 +294,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             selected_model=model,
             selected_provider=provider,
             selected_status=status,
+            selected_status_code=status_code,
             selected_tier=tier,
             sort_by=sort_by,
             direction=direction,
@@ -368,6 +434,50 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         ]
         return jsonify({"keys": keys, "count": len(keys)})
 
+    @app.post("/keys/trash-matching-status")
+    @require_unlocked
+    def trash_matching_status() -> Any:
+        try:
+            query_options, _ = key_filter_state(request.form)
+            status_code = _optional_status(request.form.get("target_status_code"))
+            if status_code is None:
+                raise ValueError("Choose an HTTP status code to trash.")
+            count = vault().trash_matching_keys(
+                status_code=status_code,
+                model=query_options["model"],  # type: ignore[arg-type]
+                key_type=query_options["key_type"],  # type: ignore[arg-type]
+                status=query_options["status"],  # type: ignore[arg-type]
+                openrouter_tier=query_options["openrouter_tier"],  # type: ignore[arg-type]
+            )
+        except ValueError as error:
+            return mutation_error(error)
+        flash(
+            f"Moved {count} {'key' if count == 1 else 'keys'} with HTTP {status_code} to trash.",
+            "success",
+        )
+        return filtered_redirect(request.form)
+
+    @app.post("/keys/delete-matching-trashed")
+    @require_unlocked
+    def delete_matching_trashed() -> Any:
+        try:
+            query_options, _ = key_filter_state(request.form)
+            count = vault().delete_matching_trashed_keys(
+                model=query_options["model"],  # type: ignore[arg-type]
+                key_type=query_options["key_type"],  # type: ignore[arg-type]
+                status=query_options["status"],  # type: ignore[arg-type]
+                status_code=query_options["status_code"],  # type: ignore[arg-type]
+                openrouter_tier=query_options["openrouter_tier"],  # type: ignore[arg-type]
+            )
+        except ValueError as error:
+            return mutation_error(error)
+        flash(
+            f"Permanently deleted {count} matching trashed "
+            f"{'key' if count == 1 else 'keys'}.",
+            "success",
+        )
+        return filtered_redirect(request.form)
+
     @app.post("/keys/<int:record_id>/delete")
     @require_unlocked
     def delete_key(record_id: int) -> Any:
@@ -501,6 +611,9 @@ def _optional_status(value: str | None) -> int | None:
     if value is None or not value.strip():
         return None
     try:
-        return int(value)
+        status_code = int(value)
     except ValueError as error:
         raise ValueError("Status code must be an integer from 100 through 599.") from error
+    if status_code < 100 or status_code > 599:
+        raise ValueError("Status code must be an integer from 100 through 599.")
+    return status_code

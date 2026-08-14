@@ -510,10 +510,13 @@ class Vault:
         status_code: int | None,
         openrouter_tier: str | None,
         include_trashed: bool,
+        only_trashed: bool = False,
     ) -> tuple[str, list[object]]:
         conditions: list[str] = []
         parameters: list[object] = []
-        if not include_trashed:
+        if only_trashed:
+            conditions.append("api_keys.trashed = 1")
+        elif not include_trashed:
             conditions.append("api_keys.trashed = 0")
         if model:
             conditions.append(
@@ -638,6 +641,59 @@ class Vault:
             rows = connection.execute(query, parameters).fetchall()
 
         return [self._record_from_row(row) for row in rows]
+
+    def trash_matching_keys(
+        self,
+        *,
+        status_code: int,
+        model: str | None = None,
+        key_type: str | None = None,
+        status: str | None = None,
+        openrouter_tier: str | None = None,
+    ) -> int:
+        where_clause, parameters = self._key_filters(
+            model=model,
+            key_type=key_type,
+            status=status,
+            status_code=status_code,
+            openrouter_tier=openrouter_tier,
+            include_trashed=False,
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE api_keys
+                SET trashed = 1, updated_at = CURRENT_TIMESTAMP
+                {where_clause}
+                """,  # noqa: S608
+                parameters,
+            )
+        return cursor.rowcount
+
+    def delete_matching_trashed_keys(
+        self,
+        *,
+        model: str | None = None,
+        key_type: str | None = None,
+        status: str | None = None,
+        status_code: int | None = None,
+        openrouter_tier: str | None = None,
+    ) -> int:
+        where_clause, parameters = self._key_filters(
+            model=model,
+            key_type=key_type,
+            status=status,
+            status_code=status_code,
+            openrouter_tier=openrouter_tier,
+            include_trashed=True,
+            only_trashed=True,
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"DELETE FROM api_keys {where_clause}",  # noqa: S608
+                parameters,
+            )
+        return cursor.rowcount
 
     def reveal_key(self, keys: VaultKeyMaterial, record_id: int) -> str:
         with self._connect() as connection:
