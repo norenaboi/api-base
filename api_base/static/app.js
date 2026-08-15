@@ -309,14 +309,7 @@
       input.value = url.searchParams.get(name) || "";
       form.append(input);
     });
-    let trashedInput = form.querySelector('input[name="trashed"]');
-    if (!trashedInput) {
-      trashedInput = document.createElement("input");
-      trashedInput.type = "hidden";
-      trashedInput.name = "trashed";
-      form.append(trashedInput);
-    }
-    trashedInput.value = trashToggle?.checked ? "1" : "0";
+    const includeTrashed = trashToggle?.checked ? "1" : "0";
     if (form.dataset.rowAction === "trash") {
       let includeInput = form.querySelector('input[name="include_trashed"]');
       if (!includeInput) {
@@ -325,7 +318,16 @@
         includeInput.name = "include_trashed";
         form.append(includeInput);
       }
-      includeInput.value = trashedInput.value;
+      includeInput.value = includeTrashed;
+    } else {
+      let trashedInput = form.querySelector('input[name="trashed"]');
+      if (!trashedInput) {
+        trashedInput = document.createElement("input");
+        trashedInput.type = "hidden";
+        trashedInput.name = "trashed";
+        form.append(trashedInput);
+      }
+      trashedInput.value = includeTrashed;
     }
     try {
       const updateInPlace = ["refresh", "trash"].includes(form.dataset.rowAction);
